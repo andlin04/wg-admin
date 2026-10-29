@@ -75,20 +75,23 @@ class Auth:
 
     def accounts(self) -> dict[str, dict[str, Any]]:
         """users.json -> {name: {hash, role, groups, schedule, expires, disabled, default}} (map wg-admin-groups).
-        A bare hash (before roles) is an admin; with no default marked, the first account is the default admin."""
+        A bare hash (before roles) is an admin; in a file of that old form the first account is the default admin.
+        Otherwise none may be marked: a portal-SSO host whose accounts were all made in the web UI (vpn1)."""
         try:
             data = json.loads(self.cfg.users_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
         out: dict[str, dict[str, Any]] = {}
+        old_form = False
         for name, v in (data.items() if isinstance(data, dict) else ()):
+            old_form = old_form or isinstance(v, str)
             v = {"hash": v} if isinstance(v, str) else v
             if not isinstance(v, dict) or not isinstance(v.get("hash"), str):
                 continue
             out[name] = {"hash": v["hash"], "role": v.get("role", "admin"), "groups": list(v.get("groups") or []),
                          "schedule": v.get("schedule", ""), "expires": v.get("expires", ""),
                          "disabled": bool(v.get("disabled")), "default": bool(v.get("default"))}
-        if out and not any(a["default"] for a in out.values()):
+        if old_form and not any(a["default"] for a in out.values()):
             first = next(iter(out.values()))
             first.update(default=True, role="admin", groups=[], schedule="", expires="", disabled=False)
         return out
@@ -115,6 +118,8 @@ class Auth:
 
     def set_password(self, name: str, password: str, **fields: Any) -> None:
         """New password; a new account gets `fields` (role, groups, ...; default: admin, as the CLI makes them).
+        Only the CLI's first account (no fields: install.sh) becomes the default admin; one made in the web UI
+        never does (owner 2026-10-29: egonn on vpn1 got locked as default and couldn't be demoted).
         Ends the account's sessions."""
         if not USER.match(name):
             raise ValueError("name: 1-64 letters, digits, . _ @ -")
@@ -122,7 +127,7 @@ class Auth:
             raise ValueError("password: at least 12 characters")
         accounts = self.accounts()
         entry = accounts.get(name) or {"role": "admin", "groups": [], "schedule": "", "expires": "",
-                                       "disabled": False, **fields, "default": not accounts}
+                                       "disabled": False, **fields, "default": not accounts and not fields}
         if entry["default"]:  # the first account is the default admin, whatever was asked
             entry.update(role="admin", groups=[], schedule="", expires="", disabled=False)
         accounts[name] = {**entry, "hash": hash_password(password)}

@@ -948,7 +948,10 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                         "you": me.via == "local" and n == me.name})
         return {"users": out, "totp_roles": acl()["totp_roles"]}
 
-    def admin_left(accounts: dict[str, dict[str, Any]]) -> bool:
+    def admin_left(accounts: dict[str, dict[str, Any]], w: Who) -> bool:
+        """A local admin stays, or the change comes from a portal admin (portal SSO keeps admin access)."""
+        if w.via == "portal":
+            return True
         today = now_local().date().isoformat()
         return any(a["role"] == "admin" and not a["disabled"] and not (a["expires"] and a["expires"] < today)
                    for a in accounts.values())
@@ -1005,7 +1008,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             if w.via == "local" and name == w.name and (new["role"] != old["role"] or new["disabled"]):
                 raise HTTPException(409, "you cannot change your own role or disable yourself: another admin can")
             accounts[name] = new
-            if not admin_left(accounts):
+            if not admin_left(accounts, w):
                 raise HTTPException(409, "at least one active admin must stay")
             auth.save_accounts(accounts)
         moved = any(new[k] != old[k] for k in ("role", "groups", "disabled"))
@@ -1030,7 +1033,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             if w.via == "local" and name == w.name:
                 raise HTTPException(409, "you cannot delete your own account: another admin can")
             del accounts[name]
-            if not admin_left(accounts):
+            if not admin_left(accounts, w):
                 raise HTTPException(409, "at least one active admin must stay")
             auth.save_accounts(accounts)
         auth.totp_reset(name)
