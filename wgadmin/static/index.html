@@ -80,6 +80,7 @@ async function start() {
   $("host").textContent = me.host || "";
   $("logout").hidden = $("acctbtn").hidden = me.via !== "local";
   mount($("vpnmount"));
+  if (me.must_enrol) openAcct();  // the role needs an authenticator: the server allows only this until it is set up
 }
 $("login").onsubmit = async (e) => {
   e.preventDefault();

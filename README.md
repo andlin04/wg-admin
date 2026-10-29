@@ -33,6 +33,16 @@ Devices, profiles (full/split/hosts), firewall rules, schedules, TOTP, NAT or ro
   every minute in this host's local time (`timedatectl set-timezone ...`). A manual switch holds until the
   schedule's next change. Data: /etc/wg-admin/totp.json, schedules.json (600 wgadmin).
 
+## Users, groups and roles
+- Roles: **admin** (everything) and **group admin** (devices of one or more groups; adds devices only into them,
+  picks profiles and schedules an admin linked to the group, creates schedules for its groups; no Server settings,
+  health, profiles, groups or users). Every route checks this on the server.
+- Users tab (admins): add, role, groups, sign-in schedule, expiry, disable, reset password or authenticator, delete;
+  "require an authenticator" per role. The first account is the default admin: it keeps its role and can't be
+  disabled, scheduled, expired or deleted. Any role, group, state or password change ends that user's sessions.
+- Groups tab (admins): group = devices + linked profiles + linked schedules. Data: /etc/wg-admin/access.json and
+  users.json (600 wgadmin). Locked out: `sudo -u wgadmin python3 -m wgadmin set-password NAME`.
+
 ## NAT or Route
 Server settings > Network. NAT (default): devices appear as this host; the router needs only the UDP port forward.
 Route: devices keep their 10.66.0.N; the router needs a route for 10.66.0.0/24 to this host (and outbound NAT for

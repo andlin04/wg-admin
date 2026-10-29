@@ -132,8 +132,8 @@ if [ ! -f /etc/wg-admin/wg-admin.env ]; then
 fi
 # Local logins and API tokens (`sudo -u wgadmin python3 -m wgadmin set-password|token NAME` in /opt/wg-admin),
 # mail settings and the SMTP relay password (Server > Mail writes them in place), authenticators (Account) and
-# access schedules (Schedules). wgadmin cannot create files here: each is created once, then written in place.
-for f in users.json tokens.json mail.json totp.json schedules.json; do
+# access schedules (Schedules), groups and roles (access.json). wgadmin cannot create files here: each is created once, then written in place.
+for f in users.json tokens.json mail.json totp.json schedules.json access.json; do
   [ -f /etc/wg-admin/$f ] || (umask 077; echo '{}' > /etc/wg-admin/$f)
   chown wgadmin:wgadmin /etc/wg-admin/$f
 done

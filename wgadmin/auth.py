@@ -3,6 +3,8 @@
 Portal: nginx on the portal host checks the portal session (auth_request, admins only) and sends X-Portal-User,
 X-Portal-Role and X-Wgadmin-Secret; those headers count only from a trusted proxy IP with the right secret.
 Standalone: local accounts in users.json (scrypt), a session cookie held in memory (a restart signs everyone out).
+users.json: {name: {hash, role, groups, schedule, expires, disabled, default}} (access.py: roles, groups, sign-in
+hours); the default admin (the first account) is never demoted, disabled, scheduled, given an expiry or deleted.
 Optional second factor per account (totp.py, owner 2026-10-27): totp.json {name: {secret, last, recovery}}.
 """
 from __future__ import annotations
@@ -71,12 +73,31 @@ class Auth:
             return {}
         return {k: v for k, v in data.items() if isinstance(v, dict) and v.get("secret")} if isinstance(data, dict) else {}
 
-    def _users(self) -> dict[str, str]:
+    def accounts(self) -> dict[str, dict[str, Any]]:
+        """users.json -> {name: {hash, role, groups, schedule, expires, disabled, default}} (map wg-admin-groups).
+        A bare hash (before roles) is an admin; with no default marked, the first account is the default admin."""
         try:
             data = json.loads(self.cfg.users_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
-        return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
+        out: dict[str, dict[str, Any]] = {}
+        for name, v in (data.items() if isinstance(data, dict) else ()):
+            v = {"hash": v} if isinstance(v, str) else v
+            if not isinstance(v, dict) or not isinstance(v.get("hash"), str):
+                continue
+            out[name] = {"hash": v["hash"], "role": v.get("role", "admin"), "groups": list(v.get("groups") or []),
+                         "schedule": v.get("schedule", ""), "expires": v.get("expires", ""),
+                         "disabled": bool(v.get("disabled")), "default": bool(v.get("default"))}
+        if out and not any(a["default"] for a in out.values()):
+            first = next(iter(out.values()))
+            first.update(default=True, role="admin", groups=[], schedule="", expires="", disabled=False)
+        return out
+
+    def save_accounts(self, accounts: dict[str, dict[str, Any]]) -> None:
+        self._write(self.cfg.users_file, accounts)
+
+    def _users(self) -> dict[str, str]:
+        return {k: v["hash"] for k, v in self.accounts().items()}
 
     def _tokens(self) -> dict[str, str]:
         try:
@@ -92,14 +113,28 @@ class Auth:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=1)
 
-    def set_password(self, name: str, password: str) -> None:
+    def set_password(self, name: str, password: str, **fields: Any) -> None:
+        """New password; a new account gets `fields` (role, groups, ...; default: admin, as the CLI makes them).
+        Ends the account's sessions."""
         if not USER.match(name):
             raise ValueError("name: 1-64 letters, digits, . _ @ -")
         if len(password) < 12:
             raise ValueError("password: at least 12 characters")
-        users = self._users()
-        users[name] = hash_password(password)
-        self._write(self.cfg.users_file, users)
+        accounts = self.accounts()
+        entry = accounts.get(name) or {"role": "admin", "groups": [], "schedule": "", "expires": "",
+                                       "disabled": False, **fields, "default": not accounts}
+        if entry["default"]:  # the first account is the default admin, whatever was asked
+            entry.update(role="admin", groups=[], schedule="", expires="", disabled=False)
+        accounts[name] = {**entry, "hash": hash_password(password)}
+        self.save_accounts(accounts)
+        self.drop_sessions(name)
+
+    def drop_sessions(self, name: str) -> int:
+        """End every session of an account (role, groups, password or state changed; deleted)."""
+        gone = [t for t, (n, _) in list(self.sessions.items()) if n == name]
+        for t in gone:
+            self.sessions.pop(t, None)
+        return len(gone)
 
     def new_token(self, name: str) -> str:
         """API token for scripts (map vpn-standalone step 3b): returned once, stored as SHA-256 (random 32 bytes

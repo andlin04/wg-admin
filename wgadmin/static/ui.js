@@ -67,10 +67,10 @@ const MARKUP = `
   <div class="pagehead"><div><h1 id="vpn-h">VPN</h1></div>
     <div class="userrow-actions">
       <button class="btn sm" id="vpnaddbtn" type="button" aria-expanded="false" aria-controls="vpnform">Add a device</button>
-      <button class="btn sm" id="vpnbulkbtn" type="button" aria-expanded="false" aria-controls="vpnbform">Add several</button>
+      <button class="btn sm vpnadmin" id="vpnbulkbtn" type="button" aria-expanded="false" aria-controls="vpnbform">Add several</button>
       <button class="btn sm" type="button" id="vpnreload">Reload</button></div></div>
   <div class="vpngrid">
-  <aside class="vpnhealth" aria-labelledby="vpnh-h">
+  <aside class="vpnhealth vpnadmin" aria-labelledby="vpnh-h">
     <div class="vpnhhead"><h2 id="vpnh-h">Health</h2>
       <button class="btn sm" type="button" id="vpnhrun">Run checks</button></div>
     <p class="meta" id="vpnhwhen" role="status"></p>
@@ -78,15 +78,65 @@ const MARKUP = `
   <div class="vpnmain">
   <!-- Tabs in set-up order (owner 2026-10-27): profiles and schedules first, so a new device can pick them -->
   <div class="seg vpnseg" role="group" aria-label="View">
-    <button type="button" class="segbtn" data-vview="profiles" aria-pressed="false">Connection profiles</button>
+    <button type="button" class="segbtn vpnadmin" data-vview="profiles" aria-pressed="false">Connection profiles</button>
     <button type="button" class="segbtn" data-vview="schedules" aria-pressed="false">Schedules</button>
     <button type="button" class="segbtn" data-vview="devices" aria-pressed="true">Devices</button>
-    <button type="button" class="segbtn" data-vview="server" aria-pressed="false">Server settings</button></div>
+    <button type="button" class="segbtn vpnadmin" data-vview="server" aria-pressed="false">Server settings</button>
+    <button type="button" class="segbtn vpnadmin" data-vview="groups" aria-pressed="false">Groups</button>
+    <button type="button" class="segbtn vpnadmin" data-vview="users" aria-pressed="false">Users</button></div>
+  <!-- Groups + Users (map wg-admin-groups): admins only; the server refuses everyone else -->
+  <div class="vpnview" id="vpnvgroups" hidden>
+  <div class="pagehead vpnphead"><div><h2>Groups</h2><p>Devices grouped for group admins. A group admin manages only
+    its groups' devices, with the connection profiles and schedules linked here.</p></div>
+    <div class="userrow-actions"><button class="btn sm" id="vpngadd" type="button">Add a group</button></div></div>
+  <form id="vpngform" class="factform" hidden>
+    <h2 id="vpngformh">Add a group</h2>
+    <label for="vpngname">Name</label>
+    <input class="input" id="vpngname" maxlength="16" autocomplete="off" pattern="[a-z0-9][a-z0-9\\-]{0,15}" placeholder="family" autocapitalize="none" spellcheck="false" required>
+    <label for="vpngdesc">Description</label>
+    <input class="input" id="vpngdesc" maxlength="160" autocomplete="off">
+    <fieldset class="vpnfs"><legend>Connection profiles its group admins may use</legend><div class="vpndays" id="vpngprofs"></div></fieldset>
+    <fieldset class="vpnfs"><legend>Schedules its group admins may use</legend><div class="vpndays" id="vpngscheds"></div></fieldset>
+    <div><button class="btn primary sm" type="submit">Save</button>
+      <button class="btn ghost sm" type="button" id="vpngcancel">Cancel</button> <span id="vpngmsg" class="meta" role="status"></span></div>
+  </form>
+  <div id="vpngbox"><div class="nodata">Loading…</div></div>
+  </div>
+  <div class="vpnview" id="vpnvusers" hidden>
+  <div class="pagehead vpnphead"><div><h2>Users</h2><p>Web UI accounts. Any change of role, groups, state or password
+    signs that user out at once. The default admin keeps its role and can't be disabled or deleted.</p></div>
+    <div class="userrow-actions"><button class="btn sm" id="vpnuadd" type="button">Add a user</button></div></div>
+  <form id="vpnuform" class="factform" hidden>
+    <h2 id="vpnuformh">Add a user</h2>
+    <label for="vpnuname">Name</label>
+    <input class="input" id="vpnuname" maxlength="64" autocomplete="off" autocapitalize="none" spellcheck="false" required>
+    <label for="vpnupw" id="vpnupwl">Password (at least 12 characters)</label>
+    <input class="input" id="vpnupw" type="password" maxlength="200" minlength="12" autocomplete="new-password">
+    <label for="vpnurole">Role</label>
+    <select class="input" id="vpnurole"><option value="group-admin">Group admin: devices of its groups</option><option value="admin">Admin: everything</option></select>
+    <fieldset class="vpnfs" id="vpnugfs"><legend>Groups</legend><div class="vpndays" id="vpnugroups"></div></fieldset>
+    <label for="vpnusched">Sign-in hours (a schedule; empty = any time)</label>
+    <select class="input" id="vpnusched"></select>
+    <label for="vpnuexp">Expires after (optional)</label>
+    <input class="input" id="vpnuexp" type="date">
+    <label class="hint"><input type="checkbox" id="vpnudis"> Disabled</label>
+    <div><button class="btn primary sm" type="submit">Save</button>
+      <button class="btn ghost sm" type="button" id="vpnucancel">Cancel</button> <span id="vpnumsg" class="meta" role="status"></span></div>
+  </form>
+  <div id="vpnubox"><div class="nodata">Loading…</div></div>
+  <fieldset class="vpnfs"><legend>Require an authenticator app for</legend>
+    <div class="vpndays"><label><input type="checkbox" id="vpnpoladmin"> admins</label>
+      <label><input type="checkbox" id="vpnpolgroup"> group admins</label></div>
+    <p class="hint">Accounts of a required role without one can only set it up (Account) until they have it.</p>
+    <div><button class="btn sm" type="button" id="vpnpolsave">Save</button> <span id="vpnpolmsg" class="meta" role="status"></span></div></fieldset>
+  </div>
   <div class="vpnview" id="vpnvdevices">
   <form id="vpnform" class="factform" hidden>
     <h2>Add a device</h2>
     <label for="vpnname">Name (owner and device)</label>
     <input class="input" id="vpnname" maxlength="31" autocomplete="off" pattern="[a-z0-9][a-z0-9\\-]{0,30}" title="lowercase letters, digits and dashes, e.g. anna-phone" placeholder="anna-phone" autocapitalize="none" spellcheck="false" required>
+    <label for="vpngroup">Group</label>
+    <select class="input" id="vpngroup"></select>
     <label for="vpnprof">Connection profile</label>
     <select class="input" id="vpnprof"></select>
     <p class="hint" id="vpnprofhint"></p>
@@ -157,6 +207,8 @@ const MARKUP = `
     <h2 id="vpnscformh">Add a schedule</h2>
     <label for="vpnscname">Name</label>
     <input class="input" id="vpnscname" maxlength="16" autocomplete="off" pattern="[a-z0-9][a-z0-9\\-]{0,15}" title="lowercase letters, digits and dashes, e.g. school-days" placeholder="school-days" autocapitalize="none" spellcheck="false" required>
+    <label for="vpnscgroup" class="vpnscnew">For group (its group admins can use and edit it)</label>
+    <select class="input vpnscnew" id="vpnscgroup"></select>
     <label for="vpnscdesc">Description</label>
     <input class="input" id="vpnscdesc" maxlength="160" autocomplete="off" placeholder="Weekdays after school">
     <fieldset class="vpnfs"><legend>Weekly hours (none = no weekly hours)</legend>
@@ -180,7 +232,9 @@ const MARKUP = `
   </div>
   <div class="vpnview" id="vpnvserver" hidden>
   <div class="pagehead vpnphead"><div><h2 id="vpns-h">Server</h2><p>WireGuard settings on the server.</p></div>
-    <div class="userrow-actions"><button class="btn sm" id="vpnsedit" type="button" aria-expanded="false" aria-controls="vpnsform">Edit</button></div></div>
+    <div class="userrow-actions"><button class="btn sm" id="vpnsedit" type="button" aria-expanded="false" aria-controls="vpnsform">Edit</button>
+      <button class="btn sm" id="vpnreboot" type="button">Reboot</button></div></div>
+  <p id="vpnrebootmsg" class="meta" role="status"></p>
   <form id="vpnsform" class="factform" hidden>
     <h2>Edit server settings</h2>
     <label for="vpnsep">Endpoint (host:port the devices dial: public name or address, forwarded port)</label>
@@ -293,6 +347,8 @@ async function act(p, what, to) {
       $("vpnqrbox").hidden = true;
     } else if (what === "schedule") {
       await api(peerPath(p.name) + "/schedule", { method: "POST", body: JSON.stringify({ schedule: to }) });
+    } else if (what === "group") {
+      await api(peerPath(p.name) + "/group", { method: "POST", body: JSON.stringify({ group: to }) });
     } else if (what === "enabled") {
       const held = p.schedule ? ` Schedule ${p.schedule} takes over again at its next change.` : "";
       if (p.enabled && !confirm(`Turn off VPN access for ${p.name}? It disconnects at once; its setup stays and can be turned on again.${held}`)) return;
@@ -509,6 +565,7 @@ function scheduleForm(s) {
   $("vpnscformh").textContent = s ? `Edit schedule ${s.name}` : "Add a schedule";
   $("vpnscname").value = s ? s.name : "";
   $("vpnscname").readOnly = !!s;
+  for (const e of root.querySelectorAll(".vpnscnew")) e.hidden = !!s;
   $("vpnscdesc").value = s ? s.description : "";
   $("vpnscwins").replaceChildren(...(s ? s.windows || [] : [undefined]).map((w) => windowRow(w)));
   $("vpnscdlist").replaceChildren(...(s ? s.ranges || [] : []).map((r) => dateRow(r)));
@@ -526,7 +583,8 @@ async function saveSchedule(ev) {
   $("vpnscmsg").textContent = "Saving…";
   try {
     const body = JSON.stringify({ name: $("vpnscname").value.trim(), description: $("vpnscdesc").value, ...scheduleText(),
-                                  starts: $("vpnscfrom").value, expires: $("vpnscexp").value });
+                                  starts: $("vpnscfrom").value, expires: $("vpnscexp").value,
+                                  group: edit ? "" : $("vpnscgroup").value });
     await api(edit ? `api/schedules/${encodeURIComponent(edit)}` : "api/schedules", { method: edit ? "PUT" : "POST", body });
     $("vpnscform").hidden = true;
     $("vpnscadd").setAttribute("aria-expanded", "false");
@@ -553,8 +611,10 @@ function renderSchedules() {
     const edit = el("button", "btn sm", "Edit"), del = el("button", "btn sm danger", "Delete");
     edit.type = del.type = "button";
     edit.onclick = () => scheduleForm(s);
-    del.disabled = s.devices > 0;
-    del.title = s.devices ? "In use: set its devices to another schedule first" : "";
+    edit.disabled = !!s.locked;
+    edit.title = s.locked || "";
+    del.disabled = s.devices > 0 || !!s.locked || s.sign_in;
+    del.title = s.locked || (s.devices ? "In use: set its devices to another schedule first" : s.sign_in ? "Sets an account's sign-in hours (Users)" : "");
     del.onclick = async () => {
       const typed = prompt(`Delete schedule ${s.name}? Type the name to confirm.`);
       if (typed === null) return;
@@ -586,13 +646,14 @@ async function loadPeers() {
   LAST = d;
   PROFILES = d.profiles;
   SCHEDULES = d.schedules || [];
+  ROLE = d.role || "admin";
+  GROUPS = d.groups || [];
+  applyRole();
   renderSchedules();
-  fillSelect($("vpnprof"), PROFILES.map((p) => [p.name, p.name]));
-  fillSelect($("vpnaddsched"), [["", "no schedule"], ...SCHEDULES.map((s) => [s.name, s.name])]);
-  $("vpnprofhint").textContent = profDesc($("vpnprof").value);
+  fillAddForm();
   renderProfiles();
   renderPeers();
-  loadFirewall();  // after the state: names and profiles for the firewall table; also follows every change
+  if (isAdmin()) loadFirewall();  // after the state: names and profiles for the firewall table; also follows every change
 }
 function renderPeers() {
   const box = $("vpnbox"), d = LAST;
@@ -653,15 +714,27 @@ function renderPeers() {
     }
     const ps = el("select", "input vpnsel");
     ps.setAttribute("aria-label", `Profile of ${p.name}`);
-    for (const name of new Set([p.profile, ...PROFILES.map((x) => x.name)])) { const o = el("option", "", name); o.value = name; ps.appendChild(o); }
+    // a group admin picks only what an admin linked to the device's group
+    const g = groupOf(p.group), mayP = (n) => isAdmin() || g.profiles.includes(n), mayS = (n) => isAdmin() || g.schedules.includes(n);
+    for (const name of new Set([p.profile, ...PROFILES.map((x) => x.name).filter(mayP)])) { const o = el("option", "", name); o.value = name; ps.appendChild(o); }
     ps.value = p.profile;
     ps.title = profDesc(p.profile);
     ps.onchange = () => act(p, "profile", ps.value);
     prof.appendChild(ps);
+    if (GROUPS.length > (isAdmin() ? 0 : 1)) {
+      const gs = el("select", "input vpnsel vpnschedsel");
+      gs.setAttribute("aria-label", `Group of ${p.name}`);
+      for (const [v, label] of [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((x) => [x.name, "group: " + x.name])]) {
+        const o = el("option", "", label); o.value = v; gs.appendChild(o);
+      }
+      gs.value = p.group || "";
+      gs.onchange = () => act(p, "group", gs.value);
+      prof.appendChild(gs);
+    }
     if (SCHEDULES.length || p.schedule) {
       const ss = el("select", "input vpnsel vpnschedsel");
       ss.setAttribute("aria-label", `Schedule of ${p.name}`);
-      for (const [v, label] of [["", "no schedule"], ...SCHEDULES.map((s) => [s.name, "schedule: " + s.name])]) {
+      for (const [v, label] of [["", "no schedule"], ...SCHEDULES.filter((s) => mayS(s.name) || s.name === p.schedule).map((s) => [s.name, "schedule: " + s.name])]) {
         const o = el("option", "", label); o.value = v; ss.appendChild(o);
       }
       ss.value = p.schedule || "";
@@ -849,6 +922,30 @@ async function saveServer(ev) {
     renderServer(d.settings);
     loadPeers();
   } catch (x) { $("vpnsmsg").textContent = x.message; }
+}
+// Reboot (map wg-admin-reboot): confirm names the host and who gets cut off; then wait until the server answers.
+async function rebootServer() {
+  const msg = $("vpnrebootmsg"), btn = $("vpnreboot");
+  let d;
+  try { d = await api("api/server/reboot"); } catch (x) { msg.textContent = x.message; return; }
+  const who = d.connected.length ? `${d.connected.length} connected device(s) lose the VPN: ${d.connected.join(", ")}.` : "No devices are connected.";
+  if (!confirm(`Reboot ${d.host}? ${who} The VPN and this page are back in about a minute.`)) return;
+  btn.disabled = true;
+  try { await api("api/server/reboot", { method: "POST", body: JSON.stringify({ host: d.host }) }); }
+  catch (x) { msg.textContent = x.message; btn.disabled = false; return; }
+  msg.textContent = `Rebooting ${d.host}…`;
+  const start = Date.now();
+  let down = false;
+  const poll = async () => {
+    let up = false;
+    try { up = (await fetch(BASE + "api/me", { cache: "no-store" })).status < 500; } catch { /* still down */ }
+    down = down || !up;
+    // back: answered after it was seen down, or after 90 s (a reboot faster than one poll interval)
+    if (up && (down || Date.now() - start > 90000)) { location.reload(); return; }
+    if (Date.now() - start > 600000) { msg.textContent = `${d.host} has not answered for 10 minutes: check it in the hypervisor.`; btn.disabled = false; return; }
+    setTimeout(poll, 5000);
+  };
+  setTimeout(poll, 8000);
 }
 async function loadServer() {
   const box = $("vpnsbox");
@@ -1135,7 +1232,188 @@ function showView(name) {
   for (const v of root.querySelectorAll(".vpnview")) v.hidden = v.id !== "vpnv" + name;
 }
 
-export function reload() { loadPeers(); loadHealth(); loadServer(); loadNetwork(); loadMail(); }
+// Roles (map wg-admin-groups): the state says who is asking; admin-only parts are hidden for group admins (the
+// server refuses them anyway) and their lists are not loaded.
+let ROLE = "admin", GROUPS = [];
+const isAdmin = () => ROLE === "admin";
+const groupOf = (name) => GROUPS.find((g) => g.name === name) || { profiles: [], schedules: [] };
+function applyRole() {
+  for (const e of root.querySelectorAll(".vpnadmin")) e.style.display = isAdmin() ? "" : "none";
+  const cur = root.querySelector("[data-vview][aria-pressed=true]");
+  if (!isAdmin() && cur && cur.classList.contains("vpnadmin")) showView("devices");
+}
+// Device add form: group first; a group admin's profile and schedule lists follow the group's links.
+function fillAddForm() {
+  fillSelect($("vpngroup"), [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((g) => [g.name, g.name])]);
+  const g = groupOf($("vpngroup").value);
+  fillSelect($("vpnprof"), PROFILES.filter((p) => isAdmin() || g.profiles.includes(p.name)).map((p) => [p.name, p.name]));
+  fillSelect($("vpnaddsched"), [["", "no schedule"], ...SCHEDULES.filter((s) => isAdmin() || g.schedules.includes(s.name)).map((s) => [s.name, s.name])]);
+  fillSelect($("vpnscgroup"), [...(isAdmin() ? [["", "no group (admins only)"]] : []), ...GROUPS.map((x) => [x.name, x.name])]);
+  $("vpnprofhint").textContent = profDesc($("vpnprof").value);
+}
+const ticks = (box, names, picked) => box.replaceChildren(...names.map((n) => {
+  const lbl = el("label"), cb = el("input");
+  cb.type = "checkbox";
+  cb.value = n;
+  cb.checked = picked.includes(n);
+  lbl.append(cb, " " + n);
+  return lbl;
+}));
+const ticked = (box) => [...box.querySelectorAll("input:checked")].map((c) => c.value);
+async function del(path, what, name, after) {
+  const typed = prompt(`Delete ${what} ${name}? Type the name to confirm.`);
+  if (typed === null) return;
+  try { await api(`${path}/${encodeURIComponent(name)}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" }); }
+  catch (x) { alert(x.message); }
+  after();
+}
+
+// Groups tab (api/groups)
+let GROUPLIST = [];
+async function loadGroups() {
+  try { GROUPLIST = (await api("api/groups")).groups; renderGroups(); }
+  catch (x) { $("vpngbox").replaceChildren(el("div", "nodata", x.message)); }
+}
+function renderGroups() {
+  if (!GROUPLIST.length) { $("vpngbox").replaceChildren(el("div", "nodata", "No groups: every device is managed by admins only.")); return; }
+  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
+  t.innerHTML = "<thead><tr><th>Group</th><th>Profiles</th><th>Schedules</th><th>Devices</th><th>Group admins</th><th></th></tr></thead>";
+  for (const g of GROUPLIST) {
+    const tr = el("tr"), who = el("td", "vpnwho"), acts = el("td"), row = el("div", "userrow-actions");
+    who.append(el("strong", "", g.name), el("div", "meta", g.description));
+    const edit = el("button", "btn sm", "Edit"), rm = el("button", "btn sm danger", "Delete");
+    edit.type = rm.type = "button";
+    edit.onclick = () => groupForm(g);
+    rm.disabled = g.devices > 0 || g.admins.length > 0;
+    rm.title = rm.disabled ? "In use: move its devices and group admins first" : "";
+    rm.onclick = () => del("api/groups", "group", g.name, () => { loadGroups(); loadPeers(); });
+    row.append(edit, rm);
+    acts.appendChild(row);
+    tr.append(who, el("td", "mono", g.profiles.join(", ") || "-"), el("td", "mono", g.schedules.join(", ") || "-"),
+              el("td", "num", String(g.devices)), el("td", "", g.admins.join(", ") || "-"), acts);
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  $("vpngbox").replaceChildren(wrap);
+}
+function groupForm(g) {
+  $("vpngformh").textContent = g ? `Edit group ${g.name}` : "Add a group";
+  $("vpngname").value = g ? g.name : "";
+  $("vpngname").readOnly = !!g;
+  $("vpngdesc").value = g ? g.description : "";
+  ticks($("vpngprofs"), PROFILES.map((p) => p.name), g ? g.profiles : []);
+  ticks($("vpngscheds"), SCHEDULES.map((s) => s.name), g ? g.schedules : []);
+  $("vpngmsg").textContent = "";
+  $("vpngform").dataset.edit = g ? g.name : "";
+  $("vpngform").hidden = false;
+  $("vpngname").focus();
+}
+async function saveGroup(ev) {
+  ev.preventDefault();
+  const edit = $("vpngform").dataset.edit;
+  const body = JSON.stringify({ name: $("vpngname").value.trim(), description: $("vpngdesc").value,
+                                profiles: ticked($("vpngprofs")), schedules: ticked($("vpngscheds")) });
+  try {
+    await api(edit ? `api/groups/${encodeURIComponent(edit)}` : "api/groups", { method: edit ? "PUT" : "POST", body });
+    $("vpngform").hidden = true;
+    loadGroups();
+    loadPeers();
+  } catch (x) { $("vpngmsg").textContent = x.message; }
+}
+
+// Users tab (api/users): accounts, roles, sign-in hours, expiry; the authenticator policy per role
+let USERS = [];
+async function loadUsers() {
+  try { renderUsers(await api("api/users")); } catch (x) { $("vpnubox").replaceChildren(el("div", "nodata", x.message)); }
+}
+function renderUsers(d) {
+  USERS = d.users;
+  $("vpnpoladmin").checked = d.totp_roles.includes("admin");
+  $("vpnpolgroup").checked = d.totp_roles.includes("group-admin");
+  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
+  t.innerHTML = "<thead><tr><th>User</th><th>Role</th><th>Sign-in</th><th>State</th><th></th></tr></thead>";
+  for (const u of USERS) {
+    const tr = el("tr"), who = el("td", "vpnwho"), acts = el("td"), row = el("div", "userrow-actions");
+    who.append(el("strong", "", u.name));
+    if (u.default) who.append(" ", el("span", "pill nodot info", "default admin"));
+    if (u.you) who.append(" ", el("span", "pill nodot", "you"));
+    const role = el("td", "", u.role === "admin" ? "admin" : "group admin");
+    if (u.groups.length) role.appendChild(el("div", "meta", u.groups.join(", ")));
+    const when = el("td", "", u.schedule || "any time");
+    if (u.expires) when.appendChild(el("div", "meta", `expires after ${u.expires}`));
+    const state = el("td");
+    state.append(el("span", "pill " + (u.state === "active" ? "ok" : "warn"), u.state), " ",
+                 el("span", "pill nodot", u.totp ? "2-step on" : "2-step off"));
+    const btn = (label, fn, cls, off) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; b.disabled = !!off; row.appendChild(b); };
+    btn("Edit", () => userForm(u));
+    btn("Password", () => userPassword(u));
+    btn("Reset 2-step", () => userAction(u, "totp-reset", `Remove ${u.name}'s authenticator? They sign in with the password and set it up again.`), "", !u.totp);
+    btn("Delete", () => del("api/users", "user", u.name, loadUsers), "danger", u.default || u.you);
+    acts.appendChild(row);
+    tr.append(who, role, when, state, acts);
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  $("vpnubox").replaceChildren(wrap);
+}
+function userForm(u) {
+  $("vpnuformh").textContent = u ? `Edit ${u.name}` : "Add a user";
+  $("vpnuname").value = u ? u.name : "";
+  $("vpnuname").readOnly = !!u;
+  $("vpnupw").value = "";
+  $("vpnupw").hidden = $("vpnupwl").hidden = !!u;
+  $("vpnupw").required = !u;
+  $("vpnurole").value = u ? u.role : "group-admin";
+  ticks($("vpnugroups"), GROUPS.map((g) => g.name), u ? u.groups : []);
+  fillSelect($("vpnusched"), [["", "any time"], ...SCHEDULES.map((s) => [s.name, s.name])]);
+  $("vpnusched").value = u ? u.schedule : "";
+  $("vpnuexp").value = u ? u.expires : "";
+  $("vpnudis").checked = !!(u && u.disabled);
+  // the default admin keeps its role and state: only password and authenticator change (server checks too)
+  for (const id of ["vpnurole", "vpnusched", "vpnuexp", "vpnudis"]) $(id).disabled = !!(u && u.default);
+  $("vpnugfs").hidden = $("vpnurole").value !== "group-admin";
+  $("vpnumsg").textContent = u && u.default ? "Default admin: only its password and authenticator can change." : "";
+  $("vpnuform").dataset.edit = u ? u.name : "";
+  $("vpnuform").hidden = false;
+  (u ? $("vpnurole") : $("vpnuname")).focus();
+}
+async function saveUser(ev) {
+  ev.preventDefault();
+  const edit = $("vpnuform").dataset.edit;
+  const body = { role: $("vpnurole").value, groups: ticked($("vpnugroups")), schedule: $("vpnusched").value,
+                 expires: $("vpnuexp").value, disabled: $("vpnudis").checked };
+  if (!edit) Object.assign(body, { name: $("vpnuname").value.trim(), password: $("vpnupw").value });
+  try {
+    renderUsers(await api(edit ? `api/users/${encodeURIComponent(edit)}` : "api/users", { method: edit ? "PUT" : "POST", body: JSON.stringify(body) }));
+    $("vpnuform").hidden = true;
+    loadGroups();
+  } catch (x) { $("vpnumsg").textContent = x.message; }
+}
+async function userPassword(u) {
+  const pw = prompt(`New password for ${u.name} (at least 12 characters). Their sessions end.`);
+  if (!pw) return;
+  try { alert((await api(`api/users/${encodeURIComponent(u.name)}/password`, { method: "POST", body: JSON.stringify({ password: pw }) })).output); }
+  catch (x) { alert(x.message); }
+}
+async function userAction(u, verb, question) {
+  if (!confirm(question)) return;
+  try { renderUsers(await api(`api/users/${encodeURIComponent(u.name)}/${verb}`, { method: "POST" })); }
+  catch (x) { alert(x.message); }
+}
+async function savePolicy() {
+  const roles = [...($("vpnpoladmin").checked ? ["admin"] : []), ...($("vpnpolgroup").checked ? ["group-admin"] : [])];
+  try {
+    const d = await api("api/policy", { method: "PUT", body: JSON.stringify({ totp_roles: roles }) });
+    $("vpnpolmsg").textContent = d.output;
+    renderUsers(d);
+  } catch (x) { $("vpnpolmsg").textContent = x.message; }
+}
+
+export function reload() {
+  loadPeers().then(() => { if (isAdmin()) { loadHealth(); loadServer(); loadNetwork(); loadMail(); loadGroups(); loadUsers(); } });
+}
 
 // opts.onAuth: called when the API says "sign in required" (standalone page: show the login; portal: reload).
 export function mount(target, opts = {}) {
@@ -1150,6 +1428,7 @@ export function mount(target, opts = {}) {
   $("vpnfwreload").onclick = loadFirewall;
   $("vpnsedit").onclick = () => serverForm($("vpnsform").hidden);
   $("vpnscancel").onclick = () => serverForm(false);
+  $("vpnreboot").onclick = rebootServer;
   $("vpnsform").onsubmit = saveServer;
   $("vpnnedit").onclick = () => networkForm($("vpnnform").hidden);
   $("vpnncancel").onclick = () => networkForm(false);
@@ -1166,6 +1445,15 @@ export function mount(target, opts = {}) {
   $("vpnbform").onsubmit = saveBulk;
   $("vpnprof").onchange = () => { $("vpnprofhint").textContent = profDesc($("vpnprof").value); };
   $("vpnpaddbtn").onclick = () => profileForm(null);
+  $("vpngroup").onchange = fillAddForm;
+  $("vpngadd").onclick = () => groupForm(null);
+  $("vpngcancel").onclick = () => { $("vpngform").hidden = true; };
+  $("vpngform").onsubmit = saveGroup;
+  $("vpnuadd").onclick = () => userForm(null);
+  $("vpnucancel").onclick = () => { $("vpnuform").hidden = true; };
+  $("vpnuform").onsubmit = saveUser;
+  $("vpnurole").onchange = () => { $("vpnugfs").hidden = $("vpnurole").value !== "group-admin"; };
+  $("vpnpolsave").onclick = savePolicy;
   $("vpnscadd").onclick = () => scheduleForm(null);
   $("vpnscwinadd").onclick = () => $("vpnscwins").appendChild(windowRow());
   $("vpnscdadd").onclick = () => $("vpnscdlist").appendChild(dateRow());
@@ -1194,7 +1482,7 @@ export function mount(target, opts = {}) {
     e.preventDefault();
     const name = $("vpnname").value.trim();
     try {
-      await api("api/peers", { method: "POST", body: JSON.stringify({ name, profile: $("vpnprof").value, tags: tagList($("vpntags").value), email: $("vpnemail").value.trim() }) });
+      await api("api/peers", { method: "POST", body: JSON.stringify({ name, profile: $("vpnprof").value, group: $("vpngroup").value, tags: tagList($("vpntags").value), email: $("vpnemail").value.trim() }) });
       const sched = $("vpnaddsched").value;
       if (sched) await api(peerPath(name) + "/schedule", { method: "POST", body: JSON.stringify({ schedule: sched }) });
       $("vpnform").hidden = true;

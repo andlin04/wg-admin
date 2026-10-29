@@ -7,6 +7,7 @@
 #   profiles | profile-set PROFILE ROUTES DNS v6=on|off allow=RULES [DESCRIPTION] | profile-del PROFILE | health
 #   server | ruleset | network
 #   server-set ENDPOINT PORT KEEPALIVE | network-set nat|route IN_IF OUT_IF GW
+#   reboot (handled here, not by vpn-peer: the host reboots 5 s later, so the API can still answer)
 set -euo pipefail
 PEER=/usr/local/sbin/vpn-peer
 (( $# <= 1 )) || { echo "refused: one request argument"; exit 2; }
@@ -36,6 +37,10 @@ elif [[ $cmd =~ ^server-set\ ($E)\ ([0-9]{1,5})\ ([0-9]{1,4})$ ]]; then
   exec "$PEER" server-set "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
 elif [[ $cmd =~ ^network-set\ (nat|route)\ ($I)\ ($I)\ ($V4)$ ]]; then
   exec "$PEER" network-set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+elif [[ $cmd == reboot ]]; then
+  # A second click while the timer waits fails on the unit name: one reboot per request window.
+  systemd-run --quiet --collect --on-active=5 --unit=wg-admin-reboot /bin/systemctl reboot
+  echo "reboot in 5 s"
 else
   echo "refused: not an allowed VPN request"; exit 2
 fi

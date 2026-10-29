@@ -24,6 +24,8 @@ class Config:
     # Access schedules + device assignments (schedule.py); checked every schedule_s seconds, 0 = off.
     schedules_file: Path = field(default_factory=lambda: Path(_env("WGADMIN_SCHEDULES", "/etc/wg-admin/schedules.json")))
     schedule_s: int = 60
+    # Device groups, device -> group and the TOTP-by-role policy (access.py; map wg-admin-groups).
+    access_file: Path = field(default_factory=lambda: Path(_env("WGADMIN_ACCESS", "/etc/wg-admin/access.json")))
     # Portal SSO: nginx on the portal host sends X-Portal-User/-Role and this secret; trusted only from these IPs.
     secret_file: Path = field(default_factory=lambda: Path(_env("WGADMIN_SECRET_FILE", "/etc/wg-admin/portal.secret")))
     trusted_proxies: tuple[str, ...] = field(

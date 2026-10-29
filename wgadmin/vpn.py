@@ -367,6 +367,11 @@ def ruleset(cfg: Config, runner: Runner | None = None) -> str:
     return call(cfg, "ruleset", runner)
 
 
+def reboot(cfg: Config, runner: Runner | None = None) -> str:
+    """Server settings > Reboot (map wg-admin-reboot): the gate schedules the reboot 5 s ahead."""
+    return call(cfg, "reboot", runner).strip()
+
+
 HANDSHAKE_FRESH_S = 180  # a handshake younger than this = connected (WireGuard re-handshakes every 2 min)
 WG_PORT = 51820
 
