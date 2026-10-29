@@ -51,8 +51,17 @@
       <input class="input" id="acctoffcode" inputmode="numeric" autocomplete="one-time-code" maxlength="20">
       <div><button class="btn danger sm" type="button" id="acctoffgo">Turn off</button></div>
     </div>
+    <form id="acctpwform" hidden>
+      <label for="acctold">Current password</label>
+      <input class="input" id="acctold" type="password" autocomplete="current-password" required>
+      <label for="acctnew">New password (at least 12 characters)</label>
+      <input class="input" id="acctnew" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>
+      <p class="hint">Every signed-in session of this account ends; sign in again with the new password.</p>
+      <div><button class="btn primary sm" type="submit">Change password</button></div>
+    </form>
     <div class="userrow-actions"><button class="btn sm" type="button" id="acctstart">Set up authenticator</button>
       <button class="btn sm" type="button" id="acctoffbtn">Turn off</button>
+      <button class="btn sm" type="button" id="acctpwbtn" aria-expanded="false" aria-controls="acctpwform">Change password</button>
       <button class="btn ghost sm" type="button" id="acctclose">Close</button>
       <span class="meta" id="acctmsg" role="status"></span></div>
   </section>
@@ -108,7 +117,8 @@ async function openAcct() {
   $("acct").hidden = !open;
   $("acctbtn").setAttribute("aria-expanded", String(open));
   if (!open) return;
-  $("acctsetup").hidden = $("acctrec").hidden = true;
+  $("acctsetup").hidden = $("acctrec").hidden = $("acctpwform").hidden = true;
+  $("acctpwbtn").setAttribute("aria-expanded", "false");
   $("acctmsg").textContent = "";
   try { acctState(await api("api/account/totp")); } catch (x) { $("acctmsg").textContent = x.message; }
 }
@@ -143,6 +153,23 @@ $("acctoffgo").onclick = async () => {
     acctState(await api("api/account/totp/disable", { method: "POST", body: JSON.stringify({ password: $("acctpw").value, code: $("acctoffcode").value.trim() }) }));
     $("acctpw").value = $("acctoffcode").value = "";
     $("acctmsg").textContent = "Authenticator off.";
+  } catch (x) { $("acctmsg").textContent = x.message; }
+};
+// Own password (api/account/password): the old one again; the server ends every session, so back to the login.
+$("acctpwbtn").onclick = () => {
+  const open = $("acctpwform").hidden;
+  $("acctpwform").hidden = !open;
+  $("acctpwbtn").setAttribute("aria-expanded", String(open));
+  if (open) $("acctold").focus();
+};
+$("acctpwform").onsubmit = async (e) => {
+  e.preventDefault();
+  $("acctmsg").textContent = "";
+  try {
+    await api("api/account/password", { method: "POST", body: JSON.stringify({ old: $("acctold").value, new: $("acctnew").value }) });
+    $("acctold").value = $("acctnew").value = "";
+    showLogin();
+    $("lmsg").textContent = "Password changed: sign in with the new one.";
   } catch (x) { $("acctmsg").textContent = x.message; }
 };
 start();
