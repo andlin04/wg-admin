@@ -34,6 +34,10 @@ function ago(seconds) {
 }
 const whenAt = (t) => t ? new Date(t * 1000).toLocaleString() : "never";
 
+// The standalone page sets this before its first api() call: the default (reload) suits only the portal, where a
+// reload brings up the portal login; without it a signed-out standalone page reloads forever (2026-10-29).
+export function setOnAuth(fn) { onAuth = fn; }
+
 export async function api(path, opts = {}) {
   const res = await fetch(BASE + path, { headers: { "Content-Type": "application/json" }, ...opts });
   const type = res.headers.get("content-type") || "";

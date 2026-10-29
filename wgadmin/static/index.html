@@ -59,8 +59,9 @@
   <div id="vpnmount"></div>
 </main>
 <script type="module">
-import { api, mount } from "./ui.js";
+import { api, mount, setOnAuth } from "./ui.js";
 const $ = (id) => document.getElementById(id);
+setOnAuth(() => { if ($("login").hidden) showLogin(); });  // signed out: the login form, never a reload
 function showLogin() {
   $("vpnmount").replaceChildren();
   $("login").hidden = false;
@@ -78,7 +79,7 @@ async function start() {
   $("who").textContent = me.user;
   $("host").textContent = me.host || "";
   $("logout").hidden = $("acctbtn").hidden = me.via !== "local";
-  mount($("vpnmount"), { onAuth: showLogin });
+  mount($("vpnmount"));
 }
 $("login").onsubmit = async (e) => {
   e.preventDefault();
