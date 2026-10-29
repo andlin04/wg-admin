@@ -77,9 +77,8 @@ def check_account(role: str, groups: list[str], sign_in: str, expires: str, know
     """Role, groups, sign-in schedule and expiry of an account (VpnError names the bad field)."""
     if role not in ROLES:
         raise VpnError("role: admin or group-admin")
+    # A group admin without groups is allowed (owner 2026-10-29): it sees no devices until an admin assigns one.
     groups = sorted(set(groups)) if role == "group-admin" else []
-    if role == "group-admin" and not groups:
-        raise VpnError("a group admin needs at least one group")
     for g in groups:
         if g not in known_groups:
             raise VpnError(f"no group {g!r}")

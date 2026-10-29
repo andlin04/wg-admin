@@ -114,7 +114,8 @@ const MARKUP = `
     <input class="input" id="vpnupw" type="password" maxlength="200" minlength="12" autocomplete="new-password">
     <label for="vpnurole">Role</label>
     <select class="input" id="vpnurole"><option value="group-admin">Group admin: devices of its groups</option><option value="admin">Admin: everything</option></select>
-    <fieldset class="vpnfs" id="vpnugfs"><legend>Groups</legend><div class="vpndays" id="vpnugroups"></div></fieldset>
+    <fieldset class="vpnfs" id="vpnugfs"><legend>Groups</legend><div class="vpndays" id="vpnugroups"></div>
+      <p class="hint" id="vpnunogroups" hidden>No groups yet: the user sees no devices until you add a group (Groups tab) and tick it here.</p></fieldset>
     <label for="vpnusched">Sign-in hours (a schedule; empty = any time)</label>
     <select class="input" id="vpnusched"></select>
     <label for="vpnuexp">Expires after (optional)</label>
@@ -1358,7 +1359,10 @@ function renderUsers(d) {
   wrap.appendChild(t);
   $("vpnubox").replaceChildren(wrap);
 }
-function userForm(u) {
+async function userForm(u) {
+  // groups fetched each time: GROUPS is from the page load and missed groups made since (owner 2026-10-29)
+  let groups = GROUPS.map((g) => g.name);
+  try { groups = (await api("api/groups")).groups.map((g) => g.name); } catch { /* keep the page-load list */ }
   $("vpnuformh").textContent = u ? `Edit ${u.name}` : "Add a user";
   $("vpnuname").value = u ? u.name : "";
   $("vpnuname").readOnly = !!u;
@@ -1366,7 +1370,8 @@ function userForm(u) {
   $("vpnupw").hidden = $("vpnupwl").hidden = !!u;
   $("vpnupw").required = !u;
   $("vpnurole").value = u ? u.role : "group-admin";
-  ticks($("vpnugroups"), GROUPS.map((g) => g.name), u ? u.groups : []);
+  ticks($("vpnugroups"), groups, u ? u.groups : []);
+  $("vpnunogroups").hidden = groups.length > 0;
   fillSelect($("vpnusched"), [["", "any time"], ...SCHEDULES.map((s) => [s.name, s.name])]);
   $("vpnusched").value = u ? u.schedule : "";
   $("vpnuexp").value = u ? u.expires : "";
