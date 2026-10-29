@@ -110,7 +110,7 @@ const MARKUP = `
   <div id="vpnbox"><div class="nodata">Loading…</div></div>
   </div>
   <div class="vpnview" id="vpnvprofiles" hidden>
-  <div class="pagehead vpnphead"><div><h2 id="vpnp-h">Connection profiles</h2><p>Client routes and DNS for a group of devices. vpn1's
+  <div class="pagehead vpnphead"><div><h2 id="vpnp-h">Connection profiles</h2><p>Client routes and DNS for a group of devices. The server's
     firewall enforces them: a device reaches only its profile's routes, and only its DNS servers.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnpaddbtn" type="button" aria-expanded="false" aria-controls="vpnpform">Add a profile</button></div></div>
   <form id="vpnpform" class="factform" hidden>
@@ -127,14 +127,14 @@ const MARKUP = `
     <label for="vpnpdns">DNS (addresses and search domain; empty = the device's own DNS)</label>
     <input class="input" id="vpnpdns" maxlength="300" autocomplete="off" autocapitalize="none" spellcheck="false">
     <label class="hint"><input type="checkbox" id="vpnpv6"> IPv6 through the tunnel</label>
-    <p class="hint">On: devices also get an fd66:66:: address and vpn1 forwards their IPv6 to the IPv6 routes (add ::/0).
+    <p class="hint">On: devices also get an fd66:66:: address and the server forwards their IPv6 to the IPv6 routes (add ::/0).
       Off: IPv6 from these devices is dropped; an IPv6 route like ::/0 then only stops IPv6 leaking past the tunnel.
-      Works beyond the tunnel only when vpn1 has an IPv6 upstream (see vpn1 in Health).</p>
+      Works beyond the tunnel only when the server has an IPv6 upstream (see the server in Health).</p>
     <label for="vpnpallow">Allowed destinations (optional firewall rules, one per line)</label>
     <textarea class="input" id="vpnpallow" rows="3" maxlength="1000" placeholder="192.168.0.10/32&#10;192.168.0.20/32 tcp 443" autocapitalize="none" spellcheck="false"></textarea>
-    <p class="hint">Empty: devices reach everything in their routes. Filled: vpn1 lets them reach only these
+    <p class="hint">Empty: devices reach everything in their routes. Filled: the server lets them reach only these
       (<code>CIDR</code> or <code>CIDR tcp|udp PORT[-PORT]</code>) plus the profile's DNS servers; everything else is
-      dropped, internet included. Only traffic inside the routes reaches vpn1: use a full tunnel to block the internet.</p>
+      dropped, internet included. Only traffic inside the routes reaches the server: use a full tunnel to block the internet.</p>
     <label for="vpnpdesc">Description</label>
     <input class="input" id="vpnpdesc" maxlength="160" autocomplete="off" placeholder="Lab VLAN only">
     <p class="hint" id="vpnphint" hidden></p>
@@ -145,8 +145,8 @@ const MARKUP = `
   <div id="vpnpbox"></div>
   </div>
   <div class="vpnview" id="vpnvschedules" hidden>
-  <div class="pagehead vpnphead"><div><h2 id="vpnsc-h">Schedules</h2><p>When devices may connect. vpn1 switches a
-    device with a schedule on and off every minute (vpn1's local time). A manual switch holds until the schedule's
+  <div class="pagehead vpnphead"><div><h2 id="vpnsc-h">Schedules</h2><p>When devices may connect. The server switches a
+    device with a schedule on and off every minute (the server's local time). A manual switch holds until the schedule's
     next change.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnscadd" type="button" aria-expanded="false" aria-controls="vpnscform">Add a schedule</button></div></div>
   <form id="vpnscform" class="factform" hidden>
@@ -175,13 +175,13 @@ const MARKUP = `
   <div id="vpnscbox"></div>
   </div>
   <div class="vpnview" id="vpnvserver" hidden>
-  <div class="pagehead vpnphead"><div><h2 id="vpns-h">Server</h2><p>WireGuard settings on vpn1.</p></div>
+  <div class="pagehead vpnphead"><div><h2 id="vpns-h">Server</h2><p>WireGuard settings on the server.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnsedit" type="button" aria-expanded="false" aria-controls="vpnsform">Edit</button></div></div>
   <form id="vpnsform" class="factform" hidden>
     <h2>Edit server settings</h2>
     <label for="vpnsep">Endpoint (host:port the devices dial: public name or address, forwarded port)</label>
     <input class="input" id="vpnsep" maxlength="300" autocomplete="off" placeholder="vpn.example.org:51820" autocapitalize="none" spellcheck="false" required>
-    <label for="vpnsport">Listen port on vpn1 (UDP)</label>
+    <label for="vpnsport">Listen port on the server (UDP)</label>
     <input class="input" id="vpnsport" type="number" min="1" max="65535" required>
     <label for="vpnska">Client keepalive (seconds, 0 = off)</label>
     <input class="input" id="vpnska" type="number" min="0" max="3600" required>
@@ -192,14 +192,14 @@ const MARKUP = `
   </form>
   <div id="vpnsbox"><div class="nodata">Loading…</div></div>
   <!-- Network (map vpn-routing-mode): NAT or routed IPv4, incoming and transit interface -->
-  <div class="pagehead vpnphead"><div><h2 id="vpnn-h">Network</h2><p>How device traffic leaves vpn1.</p></div>
+  <div class="pagehead vpnphead"><div><h2 id="vpnn-h">Network</h2><p>How device traffic leaves the server.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnnedit" type="button" aria-expanded="false" aria-controls="vpnnform">Edit</button></div></div>
   <form id="vpnnform" class="factform" hidden>
     <h2>Edit network</h2>
     <label for="vpnnmode">Mode</label>
-    <select class="input" id="vpnnmode"><option value="nat">NAT: devices appear as vpn1</option>
+    <select class="input" id="vpnnmode"><option value="nat">NAT: devices appear as the server</option>
       <option value="route">Route: devices keep their 10.66.0.N</option></select>
-    <label for="vpnnin">Incoming VPN connections (and vpn1's own traffic)</label>
+    <label for="vpnnin">Incoming VPN connections (and the server's own traffic)</label>
     <select class="input" id="vpnnin"></select>
     <label for="vpnnout" class="vpnnroute">Device traffic out (transit; same interface allowed)</label>
     <select class="input vpnnroute" id="vpnnout"></select>
@@ -211,7 +211,7 @@ const MARKUP = `
   </form>
   <div id="vpnnbox"><div class="nodata">Loading…</div></div>
   <!-- Firewall (owner 2026-10-27: readable instead of raw nftables): read from vpn1's live ruleset -->
-  <div class="pagehead vpnphead"><div><h2 id="vpnfw-h">Firewall</h2><p>What vpn1's firewall lets each connection
+  <div class="pagehead vpnphead"><div><h2 id="vpnfw-h">Firewall</h2><p>What the server's firewall lets each connection
     profile's devices reach, read from the live rules. Edit rules: change a profile's allowed destinations here.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnfwreload" type="button">Reload</button>
       <button class="btn sm" id="vpnrules" type="button" aria-expanded="false" aria-controls="vpnrulesbox">Raw rules</button></div></div>
@@ -246,7 +246,7 @@ const MARKUP = `
   <!-- Info box (owner 2026-10-27): what this is + short how-tos, right of everything -->
   <aside class="vpnhealth vpninfo" aria-labelledby="vpni-h">
     <h2 id="vpni-h">About</h2>
-    <p class="meta">WireGuard on vpn1 (wg-admin). One peer per device; it reaches only its profile's routes, not vpn1
+    <p class="meta">WireGuard on the server (wg-admin). One peer per device; it reaches only its profile's routes, not the server
       or other devices.</p>
     <h2>How to</h2>
     <ul class="meta">
@@ -531,7 +531,7 @@ async function saveSchedule(ev) {
 }
 function renderSchedules() {
   const box = $("vpnscbox");
-  $("vpnsctime").textContent = LAST ? `vpn1 time: ${wall(LAST.now)} ${LAST.tz}` : "";
+  $("vpnsctime").textContent = LAST ? `Server time: ${wall(LAST.now)} ${LAST.tz}` : "";
   if (!SCHEDULES.length) { box.replaceChildren(el("div", "nodata", "No schedules: devices are on or off by hand only.")); return; }
   const found = matching(SCHEDULES, "vpnscq", (s) => [s.name, s.description, s.weekly, s.dates, s.starts, s.expires].join(" "));
   if (!found.length) { box.replaceChildren(el("div", "nodata", "No schedule matches the filter.")); return; }
@@ -868,8 +868,8 @@ function renderServer(settings) {
 // Network (api/network): current mode as rows; the form shows transit and gateway only where they apply.
 let NET = {};
 const NET_HINT = {
-  nat: "Router: only the UDP port forward to vpn1.",
-  route: "Router: a static route for 10.66.0.0/24 to vpn1 (on the transit network if separate) and outbound NAT for it.",
+  nat: "Router: only the UDP port forward to the server.",
+  route: "Router: a static route for 10.66.0.0/24 to the server (on the transit network if separate) and outbound NAT for it.",
 };
 function networkFields() {
   const route = $("vpnnmode").value === "route", split = route && $("vpnnout").value !== $("vpnnin").value;
@@ -916,7 +916,7 @@ function renderNetwork(d) {
   NET = d;
   const addr = (n) => ((d.interfaces || []).find((i) => i.name === n) || {}).addr || "-";
   const split = d.mode === "route" && d.transit_if && d.transit_if !== d.lan_if;
-  const rows = [["Mode", d.mode === "route" ? "Route (devices keep their 10.66.0.N)" : "NAT (devices appear as vpn1)"],
+  const rows = [["Mode", d.mode === "route" ? "Route (devices keep their 10.66.0.N)" : "NAT (devices appear as the server)"],
     ["Incoming VPN connections", `${d.lan_if} (${addr(d.lan_if)})`],
     ["Device traffic out", split ? `${d.transit_if} (${addr(d.transit_if)}) via ${d.transit_gw}` : `${d.lan_if}, same as incoming`]];
   const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
@@ -966,7 +966,7 @@ function parseRuleset(text) {
 const EVERY = /^(IPv6 )?(0\.0\.0\.0\/0|::\/0)$/;
 function renderFirewall(text) {
   const box = $("vpnfwbox"), rows = parseRuleset(text);
-  if (!rows.length) { box.replaceChildren(el("div", "nodata", "No profile rules found in vpn1's ruleset.")); return; }
+  if (!rows.length) { box.replaceChildren(el("div", "nodata", "No profile rules found in the server's ruleset.")); return; }
   const byIp = {};
   for (const p of (LAST && LAST.peers) || []) for (const a of String(p.address).split(/[\s,]+/)) byIp[a.split("/")[0]] = p.name;
   const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
@@ -1009,11 +1009,11 @@ function renderFirewall(text) {
   t.append(tb);
   wrap.append(t);
   const always = el("ul", "meta vpnfwalways");
-  for (const s of ["Replies to a device's own connections pass.", "vpn1 itself answers ping only; devices never reach each other.",
+  for (const s of ["Replies to a device's own connections pass.", "The server itself answers ping only; devices never reach each other.",
                    "DNS (ports 53, 853) only to the servers in the DNS column.", "Anything not listed above is dropped.",
                    /nfproto ipv6 masquerade/.test(text)  // vpn.env NAT4=off: IPv4 routed, IPv6 still NAT66
-                     ? "IPv4 is routed: logs show each device's own tunnel address. IPv6 leaves with vpn1's address (NAT)."
-                     : "Traffic leaves vpn1 with vpn1's LAN address (NAT)."]) always.append(el("li", "", s));
+                     ? "IPv4 is routed: logs show each device's own tunnel address. IPv6 leaves with the server's address (NAT)."
+                     : "Traffic leaves the server with the server's LAN address (NAT)."]) always.append(el("li", "", s));
   box.replaceChildren(wrap, el("p", "meta", "For every device:"), always);
 }
 // Rule editor (owner 2026-10-27: edit the firewall on the Server view): one row per allowed destination, saved as
@@ -1061,7 +1061,7 @@ function ruleEditor(prof, close) {
     try {
       await api(`api/profiles/${encodeURIComponent(prof.name)}`, { method: "PUT", body: JSON.stringify({ name: prof.name,
         routes: prof.routes.join("\n"), dns: prof.dns.join(", "), description: prof.description, ipv6: prof.ipv6, allow }) });
-      loadPeers();  // re-reads the profiles and the live ruleset: the table shows what vpn1 now enforces
+      loadPeers();  // re-reads the profiles and the live ruleset: the table shows what the server now enforces
     } catch (x) { msg.textContent = x.message; save.disabled = false; }
   };
   bar.append(add, save, cancel, msg);
