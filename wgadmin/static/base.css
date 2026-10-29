@@ -16,6 +16,8 @@
   --bottomnav-h: 0px; --ease: 160ms ease;
   color-scheme: dark;
 }
+/* `hidden` must win over component display rules (.btn is inline-flex): Account/Sign out showed when signed out. */
+[hidden] { display: none !important; }
 @media (prefers-color-scheme: light) {
   :root {
     --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6; --surface-3: #e8ebf0; --border: #e1e4ea;
