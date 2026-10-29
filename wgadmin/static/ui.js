@@ -125,10 +125,13 @@ const MARKUP = `
       <button class="btn ghost sm" type="button" id="vpnucancel">Cancel</button> <span id="vpnumsg" class="meta" role="status"></span></div>
   </form>
   <div id="vpnubox"><div class="nodata">Loading…</div></div>
-  <fieldset class="vpnfs"><legend>Require an authenticator app for</legend>
+  <fieldset class="vpnfs"><legend>Sign-in policy</legend>
+    <p class="meta">Require an authenticator app for</p>
     <div class="vpndays"><label><input type="checkbox" id="vpnpoladmin"> admins</label>
       <label><input type="checkbox" id="vpnpolgroup"> group admins</label></div>
     <p class="hint">Accounts of a required role without one can only set it up (Account) until they have it.</p>
+    <label for="vpnpolhist">Password history: the last N passwords can't be reused (0 = off, max 50)</label>
+    <input class="input" id="vpnpolhist" type="number" min="0" max="50" required>
     <div><button class="btn sm" type="button" id="vpnpolsave">Save</button> <span id="vpnpolmsg" class="meta" role="status"></span></div></fieldset>
   </div>
   <div class="vpnview" id="vpnvdevices">
@@ -1332,6 +1335,7 @@ function renderUsers(d) {
   USERS = d.users;
   $("vpnpoladmin").checked = d.totp_roles.includes("admin");
   $("vpnpolgroup").checked = d.totp_roles.includes("group-admin");
+  $("vpnpolhist").value = d.pw_history;
   const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
   t.innerHTML = "<thead><tr><th>User</th><th>Role</th><th>Sign-in</th><th>State</th><th></th></tr></thead>";
   for (const u of USERS) {
@@ -1399,6 +1403,7 @@ async function saveUser(ev) {
 async function userPassword(u) {
   const pw = prompt(`New password for ${u.name} (at least 12 characters). Their sessions end.`);
   if (!pw) return;
+  if (prompt(`Confirm the new password for ${u.name}.`) !== pw) { alert("The passwords don't match; nothing changed."); return; }
   try { alert((await api(`api/users/${encodeURIComponent(u.name)}/password`, { method: "POST", body: JSON.stringify({ password: pw }) })).output); }
   catch (x) { alert(x.message); }
 }
@@ -1410,7 +1415,7 @@ async function userAction(u, verb, question) {
 async function savePolicy() {
   const roles = [...($("vpnpoladmin").checked ? ["admin"] : []), ...($("vpnpolgroup").checked ? ["group-admin"] : [])];
   try {
-    const d = await api("api/policy", { method: "PUT", body: JSON.stringify({ totp_roles: roles }) });
+    const d = await api("api/policy", { method: "PUT", body: JSON.stringify({ totp_roles: roles, pw_history: Number($("vpnpolhist").value) }) });
     $("vpnpolmsg").textContent = d.output;
     renderUsers(d);
   } catch (x) { $("vpnpolmsg").textContent = x.message; }

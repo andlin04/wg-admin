@@ -20,6 +20,7 @@ from . import schedule
 from .vpn import DESC, PROFILE, VpnError
 
 ROLES = ("admin", "group-admin")
+PW_HISTORY, PW_HISTORY_MAX = 24, 50
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -34,7 +35,10 @@ def load(path: Path) -> dict[str, Any]:
               for k, v in (data.get("groups") or {}).items() if isinstance(v, dict)}
     members = {k: v for k, v in (data.get("members") or {}).items() if isinstance(v, str) and v in groups}
     roles = [r for r in data.get("totp_roles") or [] if r in ROLES]
-    return {"groups": groups, "members": members, "totp_roles": roles}
+    # password history (owner 2026-10-29): the last N passwords can't be reused; 0 = off
+    hist = data.get("pw_history", PW_HISTORY)
+    hist = min(max(hist, 0), PW_HISTORY_MAX) if isinstance(hist, int) else PW_HISTORY
+    return {"groups": groups, "members": members, "totp_roles": roles, "pw_history": hist}
 
 
 def save(path: Path, data: dict[str, Any]) -> None:

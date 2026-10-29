@@ -102,6 +102,7 @@ class OwnPasswordIn(BaseModel):
 
 class PolicyIn(BaseModel):
     totp_roles: list[str] = Field(default_factory=list, max_length=2)
+    pw_history: int | None = Field(None, ge=0, le=50)  # None: unchanged
 
 
 @dataclass(frozen=True)
@@ -342,6 +343,14 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             raise HTTPException(403, "only for wg-admin's own accounts (signed in on this page)")
         return w.name
 
+    def new_password(name: str, password: str) -> None:
+        """Own change or admin reset: the policy's password history applies to both (422 on a reuse)."""
+        with edit_lock:
+            try:
+                auth.set_password(name, password, history=acl()["pw_history"])
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from None
+
     @app.post("/api/account/password")
     def own_password(request: Request, body: OwnPasswordIn) -> JSONResponse:
         """Change your own password: the old one again; every session of the account ends (sign in again)."""
@@ -353,8 +362,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             auth._fail(ip)
             audit(user, "password", user, False, f"wrong old password from {ip}")
             raise HTTPException(422, "wrong current password")
-        with edit_lock:
-            auth.set_password(user, body.new)
+        new_password(user, body.new)
         audit(user, "password", user, True, "own password changed", f"VPN: {user} changed their wg-admin password")
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(COOKIE, secure=True, httponly=True, samesite="strict")
@@ -946,7 +954,8 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                         "expires": a["expires"], "disabled": a["disabled"], "default": a["default"],
                         "totp": auth.totp_status(n)["enabled"], "state": access.refused(a, sched, now) or "active",
                         "you": me.via == "local" and n == me.name})
-        return {"users": out, "totp_roles": acl()["totp_roles"]}
+        acc = acl()
+        return {"users": out, "totp_roles": acc["totp_roles"], "pw_history": acc["pw_history"]}
 
     def admin_left(accounts: dict[str, dict[str, Any]], w: Who) -> bool:
         """A local admin stays, or the change comes from a portal admin (portal SSO keeps admin access)."""
@@ -1047,8 +1056,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         """Admin sets a new password (the default admin's too); the account's sessions end."""
         user = admin_of(request)
         account(name)
-        with edit_lock:
-            auth.set_password(name, body.password)
+        new_password(name, body.password)
         audit(user, "user-password", name, True, "password reset", f"VPN: password of wg-admin account {name} reset by {user}",
               f":warning: VPN: password of wg-admin account {name} reset by {user}")
         return {"output": f"password of {name} set; its sessions ended"}
@@ -1075,8 +1083,11 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         with edit_lock:
             acc = acl()
             acc["totp_roles"] = sorted(set(body.totp_roles))
+            if body.pw_history is not None:
+                acc["pw_history"] = body.pw_history
             access.save(cfg.access_file, acc)
-        out = f"authenticator required for: {', '.join(acc['totp_roles']) or 'no role'}"
+        out = (f"authenticator required for: {', '.join(acc['totp_roles']) or 'no role'}; "
+               f"password history: {acc['pw_history'] or 'off'}")
         audit(user, "policy-set", "", True, out, f"VPN: {out} (set by {user})")
         return {"output": out, **users_view(who(request))}
 

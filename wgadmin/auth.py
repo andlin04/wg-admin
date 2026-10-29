@@ -90,7 +90,8 @@ class Auth:
                 continue
             out[name] = {"hash": v["hash"], "role": v.get("role", "admin"), "groups": list(v.get("groups") or []),
                          "schedule": v.get("schedule", ""), "expires": v.get("expires", ""),
-                         "disabled": bool(v.get("disabled")), "default": bool(v.get("default"))}
+                         "disabled": bool(v.get("disabled")), "default": bool(v.get("default")),
+                         "history": [h for h in v.get("history") or [] if isinstance(h, str)]}
         if old_form and not any(a["default"] for a in out.values()):
             first = next(iter(out.values()))
             first.update(default=True, role="admin", groups=[], schedule="", expires="", disabled=False)
@@ -116,20 +117,27 @@ class Auth:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=1)
 
-    def set_password(self, name: str, password: str, **fields: Any) -> None:
+    def set_password(self, name: str, password: str, history: int = 0, **fields: Any) -> None:
         """New password; a new account gets `fields` (role, groups, ...; default: admin, as the CLI makes them).
         Only the CLI's first account (no fields: install.sh) becomes the default admin; one made in the web UI
         never does (owner 2026-10-29: egonn on vpn1 got locked as default and couldn't be demoted).
-        Ends the account's sessions."""
+        history: the last N passwords (the current one included) can't be reused; 0 = no check (the CLI's
+        break-glass reset). Ends the account's sessions."""
         if not USER.match(name):
             raise ValueError("name: 1-64 letters, digits, . _ @ -")
         if len(password) < 12:
             raise ValueError("password: at least 12 characters")
         accounts = self.accounts()
-        entry = accounts.get(name) or {"role": "admin", "groups": [], "schedule": "", "expires": "",
-                                       "disabled": False, **fields, "default": not accounts and not fields}
+        old = accounts.get(name)
+        entry = old or {"role": "admin", "groups": [], "schedule": "", "expires": "", "history": [],
+                        "disabled": False, **fields, "default": not accounts and not fields}
         if entry["default"]:  # the first account is the default admin, whatever was asked
             entry.update(role="admin", groups=[], schedule="", expires="", disabled=False)
+        if old:
+            past = [old["hash"], *old["history"]]
+            if any(check_password(password, h) for h in past[:history]):
+                raise ValueError(f"password: one of the last {history} passwords of this account; choose a new one")
+            entry["history"] = past[:49]  # always the setting's max (50 with the current): raising it works at once
         accounts[name] = {**entry, "hash": hash_password(password)}
         self.save_accounts(accounts)
         self.drop_sessions(name)

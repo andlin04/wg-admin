@@ -56,7 +56,10 @@
       <input class="input" id="acctold" type="password" autocomplete="current-password" required>
       <label for="acctnew">New password (at least 12 characters)</label>
       <input class="input" id="acctnew" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>
-      <p class="hint">Every signed-in session of this account ends; sign in again with the new password.</p>
+      <label for="acctnew2">Confirm new password</label>
+      <input class="input" id="acctnew2" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>
+      <p class="hint">Recent passwords can't be reused (Users tab policy). Every signed-in session of this account
+        ends; sign in again with the new password.</p>
       <div><button class="btn primary sm" type="submit">Change password</button></div>
     </form>
     <div class="userrow-actions"><button class="btn sm" type="button" id="acctstart">Set up authenticator</button>
@@ -165,9 +168,10 @@ $("acctpwbtn").onclick = () => {
 $("acctpwform").onsubmit = async (e) => {
   e.preventDefault();
   $("acctmsg").textContent = "";
+  if ($("acctnew").value !== $("acctnew2").value) { $("acctmsg").textContent = "The new passwords don't match."; $("acctnew2").focus(); return; }
   try {
     await api("api/account/password", { method: "POST", body: JSON.stringify({ old: $("acctold").value, new: $("acctnew").value }) });
-    $("acctold").value = $("acctnew").value = "";
+    $("acctold").value = $("acctnew").value = $("acctnew2").value = "";
     showLogin();
     $("lmsg").textContent = "Password changed: sign in with the new one.";
   } catch (x) { $("acctmsg").textContent = x.message; }
