@@ -67,6 +67,10 @@ Made-up demo data (no real names, addresses or keys).
 | setup-vpn1.sh | (source repo only) homelab wrapper: install.sh with site values + portal SSO |
 
 ## Install on a new host
+install.sh sets up everything, WireGuard included: it installs `wireguard-tools`, nftables, nginx and the Python
+packages from Debian's repositories, creates the server key and wg0, and starts `wg-quick@wg0` at boot. Nothing to
+install first; the WireGuard kernel module is part of Debian 12/13's kernel.
+
 1. Debian 12/13 VM or LXC; UDP 51820 forwarded to it by the router. Unprivileged LXC: the host loads the
    `wireguard` module.
 2. As root: `git clone <this repo> /root/wg-admin && bash /root/wg-admin/install.sh --endpoint vpn.example.org:51820`.
