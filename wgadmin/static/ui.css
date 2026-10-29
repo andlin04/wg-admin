@@ -1,0 +1,94 @@
+/* wg-admin view styles (ui.js), loaded by the portal's VPN tab and by vpn1's own page. Shared components (btn, pill,
+   tnode, tinfo, tables) come from the portal's CSS or, standalone, from base.css. */
+.vpnsel { min-width: 7.5em; }
+.vpnwho { min-width: 12em; }
+.vpnschedsel { display: block; margin-top: var(--s1); }
+/* On/off slider for VPN access (ui.js peer rows): green on, grey off */
+.vpnswitch { position: relative; width: 40px; height: 22px; flex: none; padding: 0; border: 0;
+  border-radius: 11px; background: var(--surface-3); cursor: pointer; transition: background .15s; }
+.vpnswitch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+  border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); transition: transform .15s; }
+.vpnswitch[aria-checked="true"] { background: var(--ok); }
+.vpnswitch[aria-checked="true"]::after { transform: translateX(18px); }
+.vpnswitch:focus-visible { outline: 2px solid var(--ok); outline-offset: 2px; }
+.vpnphead { margin-top: var(--s5); }
+/* Health map: chain on the left (Tools map nodes), on top only at phone width */
+.vpngrid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s5); align-items: start; }
+.vpngrid > * { min-width: 0; }
+/* Info box: right column from 1200 px, under Health in the left column 700-1199 px, last on phones */
+.vpngrid { grid-template-areas: "health" "main" "info"; }
+.vpngrid > .vpnhealth:not(.vpninfo) { grid-area: health; }
+.vpngrid > .vpnmain { grid-area: main; }
+.vpngrid > .vpninfo { grid-area: info; }
+@media (min-width: 700px) { .vpngrid { grid-template-columns: 230px minmax(0, 1fr); grid-template-areas: "health main" "info main";
+  grid-template-rows: auto 1fr; } }
+@media (min-width: 1100px) { .vpngrid { grid-template-columns: 250px minmax(0, 1fr); } }
+@media (min-width: 1200px) { .vpngrid { grid-template-columns: 220px minmax(0, 1fr) 210px; grid-template-areas: "health main info";
+  grid-template-rows: auto; gap: var(--s4); } }
+@media (min-width: 1500px) { .vpngrid { grid-template-columns: 250px minmax(0, 1fr) 250px; gap: var(--s5); } }
+.vpninfo h2 { font-size: var(--fs-md); margin: 0 0 var(--s1); }
+.vpninfo h2 + * { margin-top: 0; }
+.vpninfo p + h2 { margin-top: var(--s3); }
+.vpninfo ul { margin: 0; padding-left: 1.1em; display: grid; gap: var(--s1); font-size: var(--fs-xs); }
+/* Tabs above the main panel (Profiles | Schedules | Devices | Server settings); wraps on phones */
+.vpnseg { margin-bottom: var(--s4); flex-wrap: wrap; max-width: 100%; }
+.vpnview[hidden] { display: none; }
+.vpnview > .vpnphead:first-child { margin-top: 0; }
+/* List tables: filter box top left, pager under the table */
+.vpnlisthead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin: var(--s3) 0 var(--s2); }
+.vpnlisthead .input.vpnq { width: 16em; max-width: 100%; }
+.vpnpager { margin-top: var(--s2); }
+.vpnfwalways { margin: 0 0 var(--s3); padding-left: 1.1em; display: grid; gap: 2px; }
+/* Firewall rule editor: destination, protocol, port, remove per row */
+.vpnfwedit { display: grid; gap: var(--s2); }
+.vpnfwedit > p { margin: 0; }
+.vpnfwrules { display: grid; gap: var(--s2); }
+.vpnfwrule { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.vpnfwrule .input { width: auto; }
+.vpnfwrule .input:first-child { flex: 1 1 14em; min-width: 0; }
+.vpnfwrule .input[hidden] { display: none; }
+.vpnfwrule .input:nth-child(3) { width: 9em; }
+/* Schedule editor rows: day ticks, from/to dropdowns, date pickers */
+.vpnfs { border: 0; padding: 0; margin: 0; display: grid; gap: var(--s2); min-width: 0; }
+.vpnfs legend { font-size: var(--fs-xs); color: var(--text-muted); padding: 0; margin-bottom: var(--s2); }
+.vpnwin { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding: var(--s2);
+  border: 1px solid var(--border); border-radius: var(--r-md); }
+.vpndays { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); width: 100%; }
+.factform .vpndays label { font-size: var(--fs-sm); color: var(--text); white-space: nowrap; }
+.vpnwin .input { width: auto; }
+.vpntime { min-width: 6.5em; }
+.vpnhealth { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--s3); }
+.vpnhhead { display: flex; align-items: center; gap: var(--s2); }
+.vpnhhead h2 { font-size: var(--fs-md); margin: 0; }
+.vpnhhead .btn { margin-left: auto; }
+.vpnhealth > .meta { margin: var(--s1) 0 var(--s3); font-size: var(--fs-xs); }
+.vpnchain .tnode { width: 100%; }
+.vpnchain .tnode .tn-sub { white-space: normal; }
+.vpnchain .cloud { align-self: stretch; justify-content: center; }
+/* Details popup: label above value; long labels in a two-column grid squeezed values to one letter per line. */
+.vpnchain .tinfo dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.vpnchain .tinfo dd + dt { margin-top: 6px; }
+@media (min-width: 761px) { .vpnchain .tinfo { width: 380px; } }
+/* Topology grid (renderHealth): boxes and link gaps in column 1, the rail of a link that skips boxes in column 2. */
+.vpnchain { display: grid; grid-template-columns: minmax(0, 1fr); align-items: center; }
+.vpnchain.vrailed { grid-template-columns: minmax(0, 1fr) 14px; }
+/* Link gap: one wire per link left, their labels right. */
+.vpnchain .vwire { display: flex; align-items: stretch; gap: var(--s2); min-height: 26px; padding-left: 20px; }
+.vpnchain .vwires { display: flex; gap: 5px; flex: none; }
+.vpnchain .vwires .wire { height: auto; min-height: 26px; }
+.vpnchain .vwlabels { display: grid; align-content: center; gap: 2px; padding: 3px 0; }
+.vpnchain .vwlabel { font-size: var(--fs-xs); color: var(--text-muted); line-height: 1.3; }
+.vpnchain .vwlabels:has(.vrlabel) { flex: 1; }
+.vpnchain .vrlabel { text-align: right; }
+.vpnchain .vrail { grid-column: 2; align-self: stretch; position: relative; }
+.vpnchain .vrail::before { content: ""; position: absolute; left: 0; right: 5px; border: 0 solid var(--border-strong); }
+.vpnchain .vrail.start::before { top: 50%; bottom: 0; border-width: 2px 2px 0 0; }
+.vpnchain .vrail.mid::before { top: 0; bottom: 0; border-right-width: 2px; }
+.vpnchain .vrail.end::before { top: 0; height: 50%; border-width: 0 2px 2px 0; }
+/* Server view: long values (public key, addresses) wrap; the ruleset scrolls inside its box. */
+.vpnval { overflow-wrap: anywhere; }
+.vpnrules { max-height: 60vh; overflow: auto; background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--s3); font-size: var(--fs-xs); }
+#vpnptpl[hidden] { display: none; }
+#vpnnform [hidden] { display: none; }
+.vpnqr { display: block; width: 260px; max-width: 100%; margin: var(--s2) 0; background: #fff; padding: 8px; border-radius: var(--r-md); }

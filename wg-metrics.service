@@ -1,0 +1,6 @@
+[Unit]
+Description=WireGuard metrics for node_exporter (deploy/vpn/wg-metrics.sh)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wg-metrics

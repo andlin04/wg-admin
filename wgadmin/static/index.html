@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VPN admin</title>
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="ui.css">
+</head>
+<body>
+<!-- Standalone wg-admin on vpn1 (local login). Through the portal the same ui.js runs inside the VPN tab. -->
+<header class="topbar"><strong>VPN admin</strong><span class="meta">vpn1</span>
+  <span class="who" id="who"></span>
+  <button class="btn sm ghost" type="button" id="acctbtn" hidden aria-expanded="false" aria-controls="acct">Account</button>
+  <button class="btn sm ghost" type="button" id="logout" hidden>Sign out</button></header>
+<main id="app">
+  <form class="factform login" id="login" hidden>
+    <h1>Sign in</h1>
+    <label for="lname">Name</label>
+    <input class="input" id="lname" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+    <label for="lpw">Password</label>
+    <input class="input" id="lpw" type="password" autocomplete="current-password" required>
+    <div id="lcodebox" hidden>
+      <label for="lcode">Code from the authenticator app (or a recovery code)</label>
+      <input class="input" id="lcode" inputmode="numeric" autocomplete="one-time-code" maxlength="20" spellcheck="false">
+    </div>
+    <div><button class="btn primary sm" type="submit">Sign in</button> <span class="meta err" id="lmsg" role="status"></span></div>
+  </form>
+  <!-- Account (local accounts): authenticator app (TOTP) set-up, map vpn-totp-schedules -->
+  <section class="factform" id="acct" hidden aria-labelledby="acct-h">
+    <h2 id="acct-h">Two-step sign-in</h2>
+    <p class="hint" id="acctstate"></p>
+    <div id="acctsetup" hidden>
+      <p class="hint">Scan with Google Authenticator (or any authenticator app), or type the key. Then enter the
+        6-digit code it shows.</p>
+      <img class="vpnqr" id="acctqr" alt="QR code for the authenticator app" hidden>
+      <p class="mono vpnval" id="acctsecret"></p>
+      <label for="acctcode">Code</label>
+      <input class="input" id="acctcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+      <div><button class="btn primary sm" type="button" id="acctconfirm">Turn on</button></div>
+    </div>
+    <div id="acctrec" hidden>
+      <p class="hint"><strong>Recovery codes, shown once.</strong> Each works once instead of a code, e.g. when the
+        phone is lost. Keep them somewhere safe, away from the phone.</p>
+      <pre class="mono vpnrules" id="acctreclist"></pre>
+    </div>
+    <div id="acctoff" hidden>
+      <label for="acctpw">Password</label>
+      <input class="input" id="acctpw" type="password" autocomplete="current-password">
+      <label for="acctoffcode">Code (or a recovery code)</label>
+      <input class="input" id="acctoffcode" inputmode="numeric" autocomplete="one-time-code" maxlength="20">
+      <div><button class="btn danger sm" type="button" id="acctoffgo">Turn off</button></div>
+    </div>
+    <div class="userrow-actions"><button class="btn sm" type="button" id="acctstart">Set up authenticator</button>
+      <button class="btn sm" type="button" id="acctoffbtn">Turn off</button>
+      <button class="btn ghost sm" type="button" id="acctclose">Close</button>
+      <span class="meta" id="acctmsg" role="status"></span></div>
+  </section>
+  <div id="vpnmount"></div>
+</main>
+<script type="module">
+import { api, mount } from "./ui.js";
+const $ = (id) => document.getElementById(id);
+function showLogin() {
+  $("vpnmount").replaceChildren();
+  $("login").hidden = false;
+  $("acct").hidden = true;
+  $("logout").hidden = $("acctbtn").hidden = true;
+  $("lcodebox").hidden = true;
+  $("lcode").value = "";
+  $("who").textContent = "";
+  $("lname").focus();
+}
+async function start() {
+  let me;
+  try { me = await api("api/me"); } catch { showLogin(); return; }
+  $("login").hidden = true;
+  $("who").textContent = me.user;
+  $("logout").hidden = $("acctbtn").hidden = me.via !== "local";
+  mount($("vpnmount"), { onAuth: showLogin });
+}
+$("login").onsubmit = async (e) => {
+  e.preventDefault();
+  $("lmsg").textContent = "";
+  try {
+    const r = await api("api/login", { method: "POST", body: JSON.stringify({ name: $("lname").value.trim(), password: $("lpw").value, code: $("lcode").value.trim() }) });
+    if (r.code_required) { $("lcodebox").hidden = false; $("lcode").focus(); return; }
+    $("lpw").value = $("lcode").value = "";
+    start();
+  } catch (x) { $("lmsg").textContent = x.message; }
+};
+$("logout").onclick = async () => { await api("api/logout", { method: "POST" }).catch(() => {}); showLogin(); };
+
+// Account: authenticator status, set-up (QR + key, confirmed by a code), recovery codes, turn off.
+function acctState(s) {
+  $("acctstate").textContent = s.enabled
+    ? `On: sign-in asks for a code from the authenticator app. ${s.recovery_left} recovery code(s) left.`
+    : "Off: sign-in needs only the password. Turn it on to also ask for a code from an authenticator app.";
+  $("acctstart").textContent = s.enabled ? "Replace authenticator" : "Set up authenticator";
+  $("acctoffbtn").hidden = !s.enabled;
+  $("acctoff").hidden = true;
+}
+async function openAcct() {
+  const open = $("acct").hidden;
+  $("acct").hidden = !open;
+  $("acctbtn").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  $("acctsetup").hidden = $("acctrec").hidden = true;
+  $("acctmsg").textContent = "";
+  try { acctState(await api("api/account/totp")); } catch (x) { $("acctmsg").textContent = x.message; }
+}
+$("acctbtn").onclick = openAcct;
+$("acctclose").onclick = () => { $("acct").hidden = false; openAcct(); };
+$("acctstart").onclick = async () => {
+  $("acctmsg").textContent = "";
+  $("acctrec").hidden = true;
+  try {
+    const d = await api("api/account/totp/setup", { method: "POST" });
+    $("acctqr").hidden = !d.qr;
+    if (d.qr) $("acctqr").src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(d.qr);
+    $("acctsecret").textContent = "Key: " + d.secret.replace(/(.{4})/g, "$1 ").trim();
+    $("acctcode").value = "";
+    $("acctsetup").hidden = false;
+    $("acctcode").focus();
+  } catch (x) { $("acctmsg").textContent = x.message; }
+};
+$("acctconfirm").onclick = async () => {
+  try {
+    const d = await api("api/account/totp/confirm", { method: "POST", body: JSON.stringify({ code: $("acctcode").value.trim() }) });
+    $("acctsetup").hidden = true;
+    $("acctreclist").textContent = d.recovery.join("\n");
+    $("acctrec").hidden = false;
+    acctState(d);
+    $("acctmsg").textContent = "Authenticator on.";
+  } catch (x) { $("acctmsg").textContent = x.message; }
+};
+$("acctoffbtn").onclick = () => { $("acctoff").hidden = false; $("acctpw").focus(); };
+$("acctoffgo").onclick = async () => {
+  try {
+    acctState(await api("api/account/totp/disable", { method: "POST", body: JSON.stringify({ password: $("acctpw").value, code: $("acctoffcode").value.trim() }) }));
+    $("acctpw").value = $("acctoffcode").value = "";
+    $("acctmsg").textContent = "Authenticator off.";
+  } catch (x) { $("acctmsg").textContent = x.message; }
+};
+start();
+</script>
+</body>
+</html>
