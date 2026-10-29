@@ -41,7 +41,9 @@ setenv() {  # KEY VALUE: replace or add one line; other keys (KEEPALIVE from the
 route=$(ip -4 route show default | head -n1)
 lan_if=$(awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}' <<<"$route")
 gw=$(awk '{print $3; exit}' <<<"$route")
-dns=$(awk '$1 == "nameserver" && $2 !~ /^127\./ {print $2; exit}' /etc/resolv.conf 2>/dev/null || true)
+# systemd-resolved: /etc/resolv.conf holds only its stub 127.0.0.53; the upstream servers are in its own copy.
+dns=$(awk '$1 == "nameserver" && $2 !~ /^127\./ {print $2; exit}' /run/systemd/resolve/resolv.conf /etc/resolv.conf \
+  2>/dev/null || true)
 dns=${dns:-$gw}
 net=$(ip -4 route show dev "${LAN_IF:-$lan_if}" scope link proto kernel 2>/dev/null | awk '{print $1; exit}')
 declare -A default=([LAN_IF]=$lan_if [GATEWAY]=$gw [GATEWAY_NAME]=Gateway [DNS_CHECK]="$dns deb.debian.org"

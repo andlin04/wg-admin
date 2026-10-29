@@ -1,4 +1,5 @@
-"""python3 -m wgadmin set-password NAME   (local admin login for standalone use; password asked twice, never echoed)
+"""python3 -m wgadmin set-password NAME   (local admin login for standalone use; password asked twice, never echoed;
+                                          not a terminal: read from the first line of stdin)
 python3 -m wgadmin token NAME            (API token for scripts, printed once: `Authorization: Bearer wga_...`;
                                           the same NAME replaces its old token)
 python3 -m wgadmin token-revoke NAME
@@ -37,10 +38,13 @@ def main(argv: list[str]) -> int:
             return 1
         print(f"token {argv[1]} revoked")
         return 0
-    pw = getpass.getpass("New password: ")
-    if pw != getpass.getpass("Again: "):
-        print("passwords differ", file=sys.stderr)
-        return 1
+    if sys.stdin.isatty():
+        pw = getpass.getpass("New password: ")
+        if pw != getpass.getpass("Again: "):
+            print("passwords differ", file=sys.stderr)
+            return 1
+    else:  # scripted installs: first line of stdin
+        pw = sys.stdin.readline().rstrip("\r\n")
     try:
         auth.set_password(argv[1], pw)
     except ValueError as exc:

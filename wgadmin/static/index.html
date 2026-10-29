@@ -8,8 +8,8 @@
 <link rel="stylesheet" href="ui.css">
 </head>
 <body>
-<!-- Standalone wg-admin on vpn1 (local login). Through the portal the same ui.js runs inside the VPN tab. -->
-<header class="topbar"><strong>VPN admin</strong><span class="meta">vpn1</span>
+<!-- Standalone wg-admin (local login). Through the portal the same ui.js runs inside the VPN tab. -->
+<header class="topbar"><strong>VPN admin</strong><span class="meta" id="host"></span>
   <span class="who" id="who"></span>
   <button class="btn sm ghost" type="button" id="acctbtn" hidden aria-expanded="false" aria-controls="acct">Account</button>
   <button class="btn sm ghost" type="button" id="logout" hidden>Sign out</button></header>
@@ -76,6 +76,7 @@ async function start() {
   try { me = await api("api/me"); } catch { showLogin(); return; }
   $("login").hidden = true;
   $("who").textContent = me.user;
+  $("host").textContent = me.host || "";
   $("logout").hidden = $("acctbtn").hidden = me.via !== "local";
   mount($("vpnmount"), { onAuth: showLogin });
 }

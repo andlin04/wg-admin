@@ -21,6 +21,7 @@ Devices, profiles (full/split/hosts), firewall rules, schedules, TOTP, NAT or ro
    `LAN_IF=ens18 CLIENT_DNS=10.0.0.53 bash install.sh`). TLS: self-signed until you sign /etc/wg-admin/tls.csr.
    Behind an HTTP proxy: export `http_proxy`/`https_proxy` first (apt and git use them).
 3. First admin: `cd /opt/wg-admin && sudo -u wgadmin python3 -m wgadmin set-password NAME`; open https://HOST:8443/.
+   Scripted: `echo "$PW" | sudo -u wgadmin python3 -m wgadmin set-password NAME` (no terminal: first stdin line).
    Everything else (endpoint, DNS, routes, NAT/Route, mail, devices) is set in the UI.
 4. Update: `git -C /root/wg-admin pull && bash /root/wg-admin/install.sh` (keys, devices and settings stay).
 5. Remove: `bash uninstall.sh` (keeps keys and peers) or `bash uninstall.sh --purge` (export first).

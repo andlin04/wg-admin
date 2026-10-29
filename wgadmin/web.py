@@ -198,7 +198,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     @app.get("/api/me")
     def me(request: Request) -> dict[str, str]:
         user, via = who(request)
-        return {"user": user, "via": via}
+        return {"user": user, "via": via, "host": socket.gethostname()}
 
     @app.post("/api/login")
     def login(request: Request, body: LoginIn) -> JSONResponse:
@@ -212,7 +212,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         if token is None:
             audit(body.name if len(body.name) < 65 else "?", "login", "", False, f"failed sign-in from {ip}")
             raise HTTPException(401, "wrong name, password or code" if body.code else "wrong name or password")
-        audit(body.name, "login", "", True, f"signed in from {ip}", f"VPN: {body.name} signed in to wg-admin on vpn1")
+        audit(body.name, "login", "", True, f"signed in from {ip}", f"VPN: {body.name} signed in to wg-admin on {socket.gethostname()}")
         resp = JSONResponse({"user": body.name, "via": "local"})
         resp.set_cookie(COOKIE, token, max_age=cfg.session_s, secure=True, httponly=True, samesite="strict")
         return resp
@@ -671,7 +671,8 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             raise HTTPException(422, "to: a plain address like you@example.org")
         s = settings()
         msg = mail.message(s, body.to.strip(), "wg-admin test mail",
-                           f"Test mail from wg-admin on vpn1, sent by {user}.\nRelay: {s['host']}:{s['port']} ({s['security']}).\n")
+                           f"Test mail from wg-admin on {socket.gethostname()}, sent by {user}.\n"
+                           f"Relay: {s['host']}:{s['port']} ({s['security']}).\n")
         try:
             send(s, mail.password(cfg), msg)
         except vpn.VpnError as exc:
