@@ -359,7 +359,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             raise HTTPException(429, "too many failed attempts: wait 15 minutes")
         acct = auth.accounts().get(user)
         if not acct or not check_password(body.old, acct["hash"]):
-            auth._fail(ip)
+            auth._fail(ip, user)
             audit(user, "password", user, False, f"wrong old password from {ip}")
             raise HTTPException(422, "wrong current password")
         new_password(user, body.new)
@@ -953,6 +953,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             out.append({"name": n, "role": a["role"], "groups": a["groups"], "schedule": a["schedule"],
                         "expires": a["expires"], "disabled": a["disabled"], "default": a["default"],
                         "totp": auth.totp_status(n)["enabled"], "state": access.refused(a, sched, now) or "active",
+                        "fails": auth.lockout(n)[0], "locked": auth.lockout(n)[1],
                         "you": me.via == "local" and n == me.name})
         acc = acl()
         return {"users": out, "totp_roles": acc["totp_roles"], "pw_history": acc["pw_history"]}
@@ -1060,6 +1061,16 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         audit(user, "user-password", name, True, "password reset", f"VPN: password of wg-admin account {name} reset by {user}",
               f":warning: VPN: password of wg-admin account {name} reset by {user}")
         return {"output": f"password of {name} set; its sessions ended"}
+
+    @app.post("/api/users/{name}/unlock")
+    def user_unlock(request: Request, name: str) -> dict[str, Any]:
+        """Admin: reset the failed sign-in counter (per IP, 5 in 15 min) of every address that failed as this user."""
+        user = admin_of(request)
+        account(name)
+        n = auth.reset_lockout(name)
+        audit(user, "user-unlock", name, True, f"{n} address(es) cleared",
+              f"VPN: sign-in lockout of wg-admin account {name} reset by {user}")
+        return {"output": f"lockout of {name} reset ({n} address(es))", **users_view(who(request))}
 
     @app.post("/api/users/{name}/totp-reset")
     def user_totp_reset(request: Request, name: str) -> dict[str, Any]:

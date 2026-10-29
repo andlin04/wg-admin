@@ -124,6 +124,17 @@ const MARKUP = `
     <div><button class="btn primary sm" type="submit">Save</button>
       <button class="btn ghost sm" type="button" id="vpnucancel">Cancel</button> <span id="vpnumsg" class="meta" role="status"></span></div>
   </form>
+  <form id="vpnupwform" class="factform" hidden>
+    <h2 id="vpnupwh">New password</h2>
+    <label for="vpnupw1">New password (at least 12 characters)</label>
+    <input class="input" id="vpnupw1" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>
+    <label for="vpnupw2">Confirm new password</label>
+    <input class="input" id="vpnupw2" type="password" autocomplete="new-password" minlength="12" maxlength="200" required>
+    <label><input type="checkbox" id="vpnupwshow"> Show password</label>
+    <p class="hint">The user's sessions end. Recent passwords can't be reused (policy below).</p>
+    <div><button class="btn primary sm" type="submit">Set password</button>
+      <button class="btn ghost sm" type="button" id="vpnupwcancel">Cancel</button> <span id="vpnupwmsg" class="meta" role="status"></span></div>
+  </form>
   <div id="vpnubox"><div class="nodata">Loading…</div></div>
   <fieldset class="vpnfs"><legend>Sign-in policy</legend>
     <p class="meta">Require an authenticator app for</p>
@@ -1350,10 +1361,12 @@ function renderUsers(d) {
     const state = el("td");
     state.append(el("span", "pill " + (u.state === "active" ? "ok" : "warn"), u.state), " ",
                  el("span", "pill nodot", u.totp ? "2-step on" : "2-step off"));
+    if (u.fails) state.append(" ", el("span", "pill " + (u.locked ? "crit" : "warn"), u.locked ? "locked out" : `${u.fails} failed`));
     const btn = (label, fn, cls, off) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; b.disabled = !!off; row.appendChild(b); };
     btn("Edit", () => userForm(u));
     btn("Password", () => userPassword(u));
     btn("Reset 2-step", () => userAction(u, "totp-reset", `Remove ${u.name}'s authenticator? They sign in with the password and set it up again.`), "", !u.totp);
+    btn("Reset lockout", () => userAction(u, "unlock", `Reset ${u.name}'s failed sign-ins (${u.fails})? Blocked addresses can try again at once.`), "", !u.fails);
     btn("Delete", () => del("api/users", "user", u.name, loadUsers), "danger", u.default || u.you);
     acts.appendChild(row);
     tr.append(who, role, when, state, acts);
@@ -1400,12 +1413,25 @@ async function saveUser(ev) {
     loadGroups();
   } catch (x) { $("vpnumsg").textContent = x.message; }
 }
-async function userPassword(u) {
-  const pw = prompt(`New password for ${u.name} (at least 12 characters). Their sessions end.`);
-  if (!pw) return;
-  if (prompt(`Confirm the new password for ${u.name}.`) !== pw) { alert("The passwords don't match; nothing changed."); return; }
-  try { alert((await api(`api/users/${encodeURIComponent(u.name)}/password`, { method: "POST", body: JSON.stringify({ password: pw }) })).output); }
-  catch (x) { alert(x.message); }
+// Admin password reset: a form with hidden fields and a Show toggle (prompt() showed the text, owner 2026-10-29)
+function userPassword(u) {
+  $("vpnupwh").textContent = `New password for ${u.name}`;
+  $("vpnupwform").dataset.user = u.name;
+  $("vpnupw1").value = $("vpnupw2").value = $("vpnupwmsg").textContent = "";
+  $("vpnupwshow").checked = false;
+  $("vpnupw1").type = $("vpnupw2").type = "password";
+  $("vpnupwform").hidden = false;
+  $("vpnupw1").focus();
+}
+async function saveUserPassword(ev) {
+  ev.preventDefault();
+  const name = $("vpnupwform").dataset.user, msg = $("vpnupwmsg");
+  if ($("vpnupw1").value !== $("vpnupw2").value) { msg.textContent = "The passwords don't match."; return; }
+  try {
+    msg.textContent = (await api(`api/users/${encodeURIComponent(name)}/password`, { method: "POST", body: JSON.stringify({ password: $("vpnupw1").value }) })).output;
+    $("vpnupw1").value = $("vpnupw2").value = "";
+    $("vpnupwform").hidden = true;
+  } catch (x) { msg.textContent = x.message; }
 }
 async function userAction(u, verb, question) {
   if (!confirm(question)) return;
@@ -1464,6 +1490,9 @@ export function mount(target, opts = {}) {
   $("vpnuform").onsubmit = saveUser;
   $("vpnurole").onchange = () => { $("vpnugfs").hidden = $("vpnurole").value !== "group-admin"; };
   $("vpnpolsave").onclick = savePolicy;
+  $("vpnupwform").onsubmit = saveUserPassword;
+  $("vpnupwcancel").onclick = () => { $("vpnupw1").value = $("vpnupw2").value = ""; $("vpnupwform").hidden = true; };
+  $("vpnupwshow").onchange = () => { $("vpnupw1").type = $("vpnupw2").type = $("vpnupwshow").checked ? "text" : "password"; };
   $("vpnscadd").onclick = () => scheduleForm(null);
   $("vpnscwinadd").onclick = () => $("vpnscwins").appendChild(windowRow());
   $("vpnscdadd").onclick = () => $("vpnscdlist").appendChild(dateRow());

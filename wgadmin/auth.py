@@ -64,6 +64,7 @@ class Auth:
         self.cfg = cfg
         self.sessions: dict[str, tuple[str, float]] = {}
         self.fails: dict[str, list[float]] = {}
+        self.fail_ips: dict[str, set[str]] = {}  # account -> IPs that failed signing in as it (admin lockout reset)
         self.pending: dict[str, tuple[str, float]] = {}  # authenticator set-up: name -> (secret, deadline)
 
     def _totp(self) -> dict[str, dict]:
@@ -178,9 +179,25 @@ class Auth:
                 return f"token:{name}"
         return None
 
-    def _fail(self, ip: str) -> None:
+    def _fail(self, ip: str, name: str = "") -> None:
         now = time.time()
         self.fails[ip] = [t for t in self.fails.get(ip, []) if now - t < FAIL_WINDOW_S] + [now]
+        if name in self._users():
+            self.fail_ips.setdefault(name, set()).add(ip)
+
+    def lockout(self, name: str) -> tuple[int, bool]:
+        """Failed sign-ins as this account within the window, and whether one of its IPs is blocked now."""
+        now = time.time()
+        ips = self.fail_ips.get(name, set())
+        n = sum(len([t for t in self.fails.get(ip, []) if now - t < FAIL_WINDOW_S]) for ip in ips)
+        return n, any(self.blocked(ip) for ip in ips)
+
+    def reset_lockout(self, name: str) -> int:
+        """Admin: clear the failure counters of every IP that failed as this account -> IPs cleared."""
+        ips = self.fail_ips.pop(name, set())
+        for ip in ips:
+            self.fails.pop(ip, None)
+        return len(ips)
 
     def _second_factor(self, name: str, code: str) -> bool:
         """An authenticator code (each time step once) or an unused recovery code (then spent)."""
@@ -210,15 +227,16 @@ class Auth:
         stored = self._users().get(name)
         ok = check_password(password, stored or _DUMMY) and stored is not None
         if self.blocked(ip) or not ok:
-            self._fail(ip)
+            self._fail(ip, name)
             return None
         if name in self._totp():
             if not code.strip():
                 raise CodeRequired
             if not self._second_factor(name, code):
-                self._fail(ip)
+                self._fail(ip, name)
                 return None
         self.fails.pop(ip, None)
+        self.fail_ips.pop(name, None)
         token = secrets.token_urlsafe(32)
         self.sessions[token] = (name, now + self.cfg.session_s)
         return token
