@@ -4,7 +4,7 @@
 #   vpn-peer add NAME [PROFILE] [ALLOWED]   new key pair + next free 10.66.0.x; client config
 #                                 /etc/wireguard/clients/NAME.conf. PROFILE from /etc/wireguard/profiles (default
 #                                 split). ALLOWED overrides the client routes (LAN tests only).
-#   vpn-peer profile NAME PROFILE  switch a peer's profile (the client must import the new config)
+#   vpn-peer profile NAME PROFILE  switch a peer's profile (re-import only if routes/DNS/IPv6 differ)
 #   vpn-peer conf NAME            the client config (holds the client's private key)
 #   vpn-peer qr NAME [svg]        QR code of the client config (terminal, or SVG)
 #   vpn-peer remove NAME
@@ -19,7 +19,8 @@
 #   vpn-peer profiles             tab-separated: name routes dns peers ipv6 allow description
 #   vpn-peer profile-set NAME ROUTES DNS IPV6 ALLOW [DESCRIPTION...]   add or change a profile; ROUTES/DNS
 #                                 comma-separated, DNS "none" = no DNS line, IPV6 on|off, ALLOW "-" or allowed
-#                                 destinations CIDR[/tcp|udp/PORT[-PORT]],... Rewrites its peers' client configs.
+#                                 destinations [!]CIDR[/tcp|udp/PORT[-PORT]],... in order, first match wins, "!" =
+#                                 blocked. Rewrites its peers' client configs.
 #   vpn-peer profile-del NAME     refused while a peer uses it or it is the last profile
 #   vpn-peer health               key=value lines for the portal's health map (read-only; never prints a key)
 #   vpn-peer server               key=value server settings for wg-admin's Server view (read-only; public key only)
@@ -166,16 +167,19 @@ elements() { [ -z "$1" ] || echo " elements = { $1 };"; }
 # other peers' IPv6 is dropped, so their IPv6 routes (::/0) only keep IPv6 from leaking outside the tunnel.
 # Allowed destinations (field 5, "-" = none; map vpn-profile-rules): the peers reach only those (plus their DNS
 # servers), not the whole routes.
-# One accept rule per allowed destination $2 (CIDR[/tcp|udp/PORT[-PORT]]) of profile id $1 and family $3 (4|6).
+# One rule per allowed destination $2 (CIDR[/tcp|udp/PORT[-PORT]]) of profile id $1 and family $3 (4|6), in list
+# order (first match wins): accept, or drop for a "!" entry (map vpn-least-privilege, 2026-11-01: e.g.
+# "...,!192.168.0.0/16,0.0.0.0/0" = listed LAN hosts, no other LAN, the whole internet).
 allow_rule() {
-  local a p proto ports fam=ip peers=@$1_peers match
-  IFS=/ read -r a p proto ports <<<"$2"
+  local a p proto ports fam=ip peers=@$1_peers match verdict=accept x=$2
+  [[ $x == !* ]] && verdict=drop x=${x#!}
+  IFS=/ read -r a p proto ports <<<"$x"
   [ "$3" = 6 ] && fam=ip6 peers=@$1_peers6
   match="$fam daddr $a/$p"
   [ -z "$proto" ] || match+=" $proto dport $ports"
   local out=$OUT4
   [ "$3" = 6 ] && out=$LAN
-  echo "    iifname \"wg0\" oifname \"$out\" $fam saddr $peers $match accept"
+  echo "    iifname \"wg0\" oifname \"$out\" $fam saddr $peers $match $verdict"
 }
 # One accept rule per INBOUND entry $1 (SRC>DST[/proto/PORT[-PORT]]), arriving on $OUT4; a malformed entry becomes a
 # comment line, so one typo never blocks the whole firewall.
@@ -373,7 +377,12 @@ EOF
       mine() { if ($0 ~ /# profile: /) sub(/# profile: [a-z0-9-]+/, p); else sub(n, n "\n" p) } {print}' \
       "$CONF" > "$CONF.new"
     chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"
-    apply "$name" "$profile"; mark "$name"; firewall
+    # Re-import only when the client config changed: profiles with the same routes, DNS and IPv6 (e.g. full and a
+    # restricted full-tunnel profile) differ only in vpn1's firewall (map vpn-least-privilege, 2026-11-01).
+    before=$(cat "$DIR/$name.conf")
+    apply "$name" "$profile"
+    [ "$before" = "$(cat "$DIR/$name.conf")" ] || mark "$name"
+    firewall
     logger -t vpn-peer "profile $name $profile"
     echo "profile $name $profile"
     ;;
@@ -470,8 +479,8 @@ EOF
       IFS=, read -ra xs <<<"$allow"
       (( ${#xs[@]} >= 1 && ${#xs[@]} <= 20 )) || { echo "allow: 1-20 rules"; exit 2; }
       for x in "${xs[@]}"; do
-        [[ $x =~ ^([0-9.]{7,15}/[0-9]{1,2}|[0-9a-f:]{2,39}/[0-9]{1,3})(/(tcp|udp)/[0-9]{1,5}(-[0-9]{1,5})?)?$ ]] \
-          || { echo "allow: $x is not CIDR[/tcp|udp/PORT[-PORT]]"; exit 2; }
+        [[ $x =~ ^!?([0-9.]{7,15}/[0-9]{1,2}|[0-9a-f:]{2,39}/[0-9]{1,3})(/(tcp|udp)/[0-9]{1,5}(-[0-9]{1,5})?)?$ ]] \
+          || { echo "allow: $x is not [!]CIDR[/tcp|udp/PORT[-PORT]]"; exit 2; }
         [[ $x != *:* || $v6 == on ]] || { echo "allow: IPv6 rule $x needs ipv6 on"; exit 2; }
       done
     fi

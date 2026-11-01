@@ -491,11 +491,14 @@ function inCidr(ip, cidr) {
   const base = ip4(net), size = 2 ** (32 - Number(bits));
   return base !== null && /^\d+$/.test(bits) && Number(bits) <= 32 && Math.floor(ip / size) === Math.floor(base / size);
 }
-// A profile reaches an address: inside its allow list (plus its DNS servers) when it has one, else inside its routes.
+// A profile reaches an address: its DNS servers, or the first allow line that matches is not a "!" block; no allow
+// list = inside its routes.
 function reaches(p, term) {
   const ip = ip4(term);
   if (ip === null) return false;
-  return ((p.allow || []).length ? [...p.allow, ...p.dns] : p.routes).some((c) => inCidr(ip, c));
+  if (!(p.allow || []).length) return p.routes.some((c) => inCidr(ip, c));
+  const hit = p.allow.find((c) => inCidr(ip, c.replace(/^!\s*/, "")));
+  return p.dns.some((c) => inCidr(ip, c)) || (hit !== undefined && !hit.startsWith("!"));
 }
 // -> [rows of the current page, pager element (empty when one page is enough)]
 // Rows per page, chosen under each list and kept in this browser; 0 = all.
@@ -1218,11 +1221,13 @@ function parseRuleset(text) {
       continue;
     }
     if (cur && buf === null && /^\s*\}\s*$/.test(line)) { cur = null; continue; }
-    if ((m = /\b(ip6?) saddr @(\S+?)_peers6? (.*)\baccept\s*$/.exec(line)) && !line.includes("dport { 53, 853 }")) {
+    // "!" allow entries (map vpn-least-privilege) are drop rules in list order: shown as "blocked X" in place
+    if ((m = /\b(ip6?) saddr @(\S+?)_peers6? (.*)\b(accept|drop)\s*$/.exec(line)) && !line.includes("dport { 53, 853 }")) {
       const d = /daddr (\S+)(?: (tcp|udp) dport (\S+))?/.exec(m[3]);
       if (!d) continue;
       const dst = d[1].startsWith("@") ? sets[d[1].slice(1)] || [] : [d[1]];
-      (accepts[m[2]] = accepts[m[2]] || []).push(...dst.map((x) => (m[1] === "ip6" ? "IPv6 " : "") + x + (d[2] ? ` ${d[2]} ${d[3]}` : "")));
+      (accepts[m[2]] = accepts[m[2]] || []).push(...dst.map((x) => (m[4] === "drop" ? "blocked " : "") +
+        (m[1] === "ip6" ? "IPv6 " : "") + x + (d[2] ? ` ${d[2]} ${d[3]}` : "")));
     }
   }
   const ids = Object.keys(sets).filter((s) => /_peers$/.test(s)).map((s) => s.slice(0, -6));
@@ -1245,9 +1250,10 @@ function renderFirewall(text) {
     const ips = [...new Set(r.peers.map((a) => a.split("/")[0]))];
     if (!ips.length) devs.append(el("span", "meta", "none switched on"));
     for (const ip of ips) devs.append(el("div", "", byIp[ip] ? `${byIp[ip]} ` : ""), el("div", "meta mono", ip));
-    const every = r.reach.filter((x) => EVERY.test(x));
-    if (every.length) reach.append(el("div", "", "everything: LAN and internet" + (every.some((x) => x.startsWith("IPv6")) ? " (IPv4 + IPv6)" : "")));
+    const every = r.reach.filter((x) => EVERY.test(x)), blocks = r.reach.some((x) => x.startsWith("blocked "));
     for (const x of r.reach.filter((y) => !EVERY.test(y))) reach.append(el("div", "", x));
+    if (every.length) reach.append(el("div", "", (blocks ? "everything else (internet)" : "everything: LAN and internet") +
+      (every.some((x) => x.startsWith("IPv6")) ? " (IPv4 + IPv6)" : "")));
     if (!r.reach.length) reach.append(el("span", "meta", "nothing"));
     tr.append(who, devs, reach, el("td", "mono kb-hide-sm", r.hasDns ? r.dns.join(", ") || "none" : "not restricted"));
     tr.append(acts);
@@ -1332,7 +1338,8 @@ function ruleEditor(prof, close) {
   };
   bar.append(add, save, cancel, msg);
   box.append(el("p", "meta", `Allowed destinations for ${prof.name}. No rules: its devices reach everything in its routes ` +
-    `(${prof.routes.join(", ")}). With rules: only these, plus its DNS servers; the rest is dropped. Up to 20.`), list, bar);
+    `(${prof.routes.join(", ")}). With rules: only these, plus its DNS servers; the rest is dropped. Up to 20, first match wins; ` +
+    `!192.168.0.0/16 blocks (e.g. LAN hosts, then !192.168.0.0/16, then 0.0.0.0/0 = those hosts + internet).`), list, bar);
   if (!(prof.allow || []).length) add.onclick();
   return box;
 }

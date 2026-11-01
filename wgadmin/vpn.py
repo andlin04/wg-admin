@@ -73,11 +73,16 @@ def _items(text: str) -> list[str]:
 
 def allow_rules(text: str, ipv6: bool) -> list[str]:
     """Allowed destinations (map vpn-profile-rules, owner 2026-10-27): one rule per line or comma,
-    `CIDR` or `CIDR tcp|udp PORT[-PORT]` -> gate tokens `CIDR[/proto/PORT[-PORT]]`. Empty = the routes."""
+    `CIDR` or `CIDR tcp|udp PORT[-PORT]` -> gate tokens `CIDR[/proto/PORT[-PORT]]`. Empty = the routes.
+    In order, first match wins; a leading "!" blocks (map vpn-least-privilege, 2026-11-01)."""
     out = []
     for line in re.split(r"[\n,]", text):
-        parts = line.split()
+        rest = line.strip()
+        block = rest.startswith("!")
+        parts = rest[block:].split()
         if not parts:
+            if block:
+                raise VpnError(f"rule {rest!r}: a network after !, such as !192.168.0.0/16")
             continue
         try:
             net = ipaddress.ip_network(parts[0])
@@ -85,7 +90,7 @@ def allow_rules(text: str, ipv6: bool) -> list[str]:
             raise VpnError(f"rule {line.strip()!r}: {parts[0]!r} is not a network such as 192.168.0.10/32") from None
         if net.version == 6 and not ipv6:
             raise VpnError(f"rule {line.strip()!r}: IPv6 rules need IPv6 on")
-        token = str(net)
+        token = ("!" if block else "") + str(net)
         if len(parts) > 1:
             m = re.fullmatch(r"(\d{1,5})(?:-(\d{1,5}))?", parts[2]) if len(parts) == 3 else None
             lo, hi = (int(m[1]), int(m[2] or m[1])) if m else (0, 0)

@@ -2,6 +2,16 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-01: block rules in a profile, profile switch without re-import
+
+- Allowed destinations are checked in order, first match wins; a line starting with `!` blocks. Example: the
+  portal's ports, then `!192.168.0.0/16`, then `0.0.0.0/0` = the portal plus the internet, no other LAN host.
+  The Firewall table shows such lines as "blocked ...".
+- Switching a device between profiles with the same routes, DNS and IPv6 changes only the server's firewall: the
+  device is no longer asked to re-import its configuration.
+- README screenshots retaken from the current version; new ones for bulk edit, the Log tab and Server settings >
+  Logging.
+
 ## 2026-11-01: connection log, Log tab, logging settings, bulk edit with several settings
 
 ### Connection log

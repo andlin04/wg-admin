@@ -15,7 +15,7 @@ cmd=${SSH_ORIGINAL_COMMAND:-${1:-}}
 N='[a-z0-9][a-z0-9-]{0,30}' P='[a-z0-9][a-z0-9-]{0,15}'
 G='-|[a-z0-9][a-z0-9-]{0,19}(,[a-z0-9][a-z0-9-]{0,19}){0,7}'
 R='[0-9a-f.:/,]+' D='[a-z0-9.:,-]+' T="[A-Za-z0-9 ,.:;()/+'-]{0,160}"  # vpn-peer checks R/D lengths
-A='-|[0-9a-f.:/,tcpud-]+'  # allowed destinations: CIDR[/tcp|udp/PORT[-PORT]],... (vpn-peer checks each)
+A='-|[0-9a-f.:/,tcpud!-]+'  # allowed destinations: [!]CIDR[/tcp|udp/PORT[-PORT]],... (vpn-peer checks each)
 E='([a-z0-9.-]{1,253}|\[[0-9a-f:]{2,39}\]):[0-9]{1,5}'  # endpoint host:port; one inner group (BASH_REMATCH[2])
 I='[A-Za-z0-9][A-Za-z0-9._-]{0,14}' V4='-|([0-9]{1,3}[.]){3}[0-9]{1,3}'  # interface name; IPv4 or "-"
 READ='^(dump|profiles|health|server|ruleset|network|logging|log [0-9]{1,3})$'  # read-only, polled: not logged

@@ -32,6 +32,8 @@ Made-up demo data (no real names, addresses or keys).
 | ![Sign in](docs/login.png) Sign in (local account; optional authenticator code) | ![Profiles](docs/profiles.png) Connection profiles: routes, DNS, allowed hosts |
 | ![Schedules](docs/schedules.png) Schedules: when devices may connect | ![Server](docs/server.png) Server settings, network mode, firewall |
 | ![Groups](docs/groups.png) Groups: devices, profiles and schedules for group admins | ![Users](docs/users.png) Users: roles, sign-in hours, 2-step, lockout reset |
+| ![Bulk edit](docs/bulk.png) Bulk edit: several settings on the ticked devices in one go | ![Log](docs/log.png) Log: connections, WireGuard handshakes, admin actions |
+| ![Logging](docs/logging.png) Server settings > Logging: days kept, size per day, syslog forward | |
 
 ## Using it
 1. **Sign in** at `https://HOST:8443/` with the first admin account (install step 3 below).
