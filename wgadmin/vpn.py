@@ -367,6 +367,88 @@ def ruleset(cfg: Config, runner: Runner | None = None) -> str:
     return call(cfg, "ruleset", runner)
 
 
+LOG_LINE = re.compile(r"^(\S+) \S+ ([\w.-]+)(?:\[\d+\])?: (.*)$")
+LOG_EP = re.compile(r"\((\d{1,3}(?:\.\d{1,3}){3}:\d+|\[[0-9a-f:]+\]:\d+)\)")  # kernel lines: "(1.2.3.4:5678)"
+LOG_WARN = re.compile(r"Invalid|did not complete|giving up|unallowed|No route|Zeroing|stopped hearing|Dropping|"
+                      r"incorrect size|neither ipv4|ok=False|event=(end|removed)")
+
+
+def parse_log(text: str) -> list[dict[str, Any]]:
+    """`vpn-peer log` (journalctl short-iso) -> {time, kind, peer, warn, text}, newest first (map wg-admin-log).
+    kind: conn (wg-connlog.sh), wireguard (kernel), admin (wg-admin audit). The kernel knows peers only by number
+    and endpoint: its lines get the device name from a wg-conn line with the same endpoint."""
+    rows: list[dict[str, Any]] = []
+    by_ep: dict[str, str] = {}
+    for line in text.splitlines():
+        m = LOG_LINE.match(line)
+        if not m:
+            continue
+        when, ident, msg = m.groups()
+        when = re.sub(r"\.\d+(?=[+Z-])", "", when)  # rsyslog's microseconds: not every browser parses them
+        peer = ""
+        if ident == "wg-conn":
+            kind = "conn"
+            p, e = re.search(r"\bpeer=(\S+)", msg), re.search(r"\bendpoint=(\S+)", msg)
+            peer = p.group(1) if p else ""
+            if peer and e and e.group(1) != "(none)":
+                by_ep[e.group(1)] = peer
+        elif ident == "kernel" and "wireguard: " in msg[:40]:
+            kind, msg = "wireguard", re.sub(r"^(\[\s*[\d.]+\]\s*)?wireguard: ", "", msg)
+        elif msg.startswith("wg-admin INFO audit "):
+            kind, msg = "admin", msg.removeprefix("wg-admin INFO audit ")
+            n = re.search(r"\bname=(\S+)", msg)
+            peer = n.group(1) if n and NAME.match(n.group(1)) else ""
+        else:
+            continue
+        rows.append({"time": when, "kind": kind, "peer": peer, "warn": bool(LOG_WARN.search(msg)), "text": msg})
+    by_num: dict[str, str] = {}
+    for r in rows:  # kernel lines: name by endpoint, then by peer number (lines without an endpoint)
+        if r["kind"] != "wireguard":
+            continue
+        e, n = LOG_EP.search(r["text"]), re.search(r"\b[Pp]eer (\d+)", r["text"])
+        if e and e.group(1) in by_ep:
+            r["peer"] = by_ep[e.group(1)]
+            if n:
+                by_num[n.group(1)] = r["peer"]
+        elif n and n.group(1) in by_num:
+            r["peer"] = by_num[n.group(1)]
+    rows.reverse()
+    return rows
+
+
+def log(cfg: Config, hours: int, runner: Runner | None = None) -> list[dict[str, Any]]:
+    return parse_log(call(cfg, f"log {int(hours)}", runner))
+
+
+SYSLOG_HOST = re.compile(r"^(-|[A-Za-z0-9.-]{1,253}|[0-9a-f:]{2,39})$")  # vpn-gate.sh allows the same
+
+
+def logging_view(cfg: Config, runner: Runner | None = None) -> dict[str, Any]:
+    """Server settings > Logging (`vpn-peer logging`): local days, syslog forward, log sizes in bytes."""
+    kv = dict(x.split("=", 1) for x in call(cfg, "logging", runner).splitlines() if "=" in x)
+    num = lambda k, d=0: int(kv[k]) if kv.get(k, "").isdigit() else d  # noqa: E731
+    host = kv.get("host", "")
+    return {"days": num("days", 30), "host": "" if host in ("", "-") else host, "port": num("port", 514),
+            "proto": kv.get("proto") if kv.get("proto") in ("udp", "tcp") else "udp", "bytes": num("bytes"),
+            "today": num("today"), "yesterday": num("yesterday"), "oldest": kv.get("oldest", ""),
+            "queued": num("queued"), "rsyslog": kv.get("rsyslog", "")}
+
+
+def logging_request(days: int, host: str, port: int, proto: str) -> str:
+    host = host.strip() or "-"
+    if not 1 <= days <= 365:
+        raise VpnError("days: 1-365")
+    if not SYSLOG_HOST.match(host):
+        raise VpnError("syslog server: a host name or IP address")
+    if not 1 <= port <= 65535 or proto not in ("udp", "tcp"):
+        raise VpnError("port 1-65535, protocol udp or tcp")
+    return f"logging-set {days} {host} {port} {proto}"
+
+
+def save_logging(cfg: Config, days: int, host: str, port: int, proto: str, runner: Runner | None = None) -> str:
+    return call(cfg, logging_request(days, host, port, proto), runner).strip()
+
+
 def reboot(cfg: Config, runner: Runner | None = None) -> str:
     """Server settings > Reboot (map wg-admin-reboot): the gate schedules the reboot 5 s ahead."""
     return call(cfg, "reboot", runner).strip()

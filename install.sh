@@ -26,7 +26,7 @@ fqdn=${fqdn:-$(hostname -f 2>/dev/null || hostname)}
 [ "$(id -u)" = 0 ] || { echo "install.sh: run as root" >&2; exit 1; }
 
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools nftables qrencode dnsutils iputils-ping age \
-  python3-fastapi python3-uvicorn sudo openssl nginx >/dev/null
+  python3-fastapi python3-uvicorn sudo openssl nginx rsyslog logrotate >/dev/null
 
 # ---------------------------------------------------------------- WireGuard
 # Only for new directories (rule:shared-dir-perms); wireguard-tools may already have made /etc/wireguard (700).
@@ -47,8 +47,8 @@ dns=$(awk '$1 == "nameserver" && $2 !~ /^127\./ {print $2; exit}' /run/systemd/r
 dns=${dns:-$gw}
 net=$(ip -4 route show dev "${LAN_IF:-$lan_if}" scope link proto kernel 2>/dev/null | awk '{print $1; exit}')
 declare -A default=([LAN_IF]=$lan_if [GATEWAY]=$gw [GATEWAY_NAME]=Gateway [DNS_CHECK]="$dns deb.debian.org"
-                    [CLIENT_DNS]=$dns [SPLIT_ROUTES]=$net [NAT4]=on [TRANSIT_IF]= [TRANSIT_GW]=)
-for k in LAN_IF GATEWAY GATEWAY_NAME DNS_CHECK CLIENT_DNS SPLIT_ROUTES NAT4 TRANSIT_IF TRANSIT_GW; do
+                    [CLIENT_DNS]=$dns [SPLIT_ROUTES]=$net [NAT4]=on [TRANSIT_IF]= [TRANSIT_GW]= [INBOUND]=)
+for k in LAN_IF GATEWAY GATEWAY_NAME DNS_CHECK CLIENT_DNS SPLIT_ROUTES NAT4 TRANSIT_IF TRANSIT_GW INBOUND; do
   if [ -n "${!k:-}" ]; then setenv "$k" "${!k}"; elif ! has "$k"; then setenv "$k" "${default[$k]}"; fi
 done
 [ -n "$endpoint" ] && setenv ENDPOINT "$endpoint"
@@ -166,6 +166,16 @@ systemctl enable -q nftables wg-quick@wg0 wg-admin
 systemctl restart nftables
 systemctl is-active -q wg-quick@wg0 || systemctl start wg-quick@wg0
 systemctl restart wg-admin
+# VPN log (map wg-admin-log): local file + optional syslog forward (Server settings > Logging; kept settings on re-runs),
+# fed by wg-connlog (connections, handshakes) and the kernel's WireGuard messages; wg-admin's Log tab shows it.
+envget() { sed -n "s/^$1=//p" "$ENV" | head -n1; }
+/usr/local/sbin/vpn-peer logging-set "$(envget LOG_DAYS || true)" "$(envget SYSLOG_HOST || true)" \
+  "$(envget SYSLOG_PORT || true)" "$(envget SYSLOG_PROTO || true)" >/dev/null 2>&1 \
+  || /usr/local/sbin/vpn-peer logging-set 30 - 514 udp
+install -m 755 wg-connlog.sh /usr/local/sbin/wg-connlog
+install -m 644 wg-connlog.service wg-connlog.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable -q --now wg-connlog.timer
 # Prometheus metrics only where node_exporter's textfile collector runs (found missing on a clean test guest).
 if [ -d /var/lib/prometheus/node-exporter ]; then
   install -m 755 wg-metrics.sh /usr/local/sbin/wg-metrics

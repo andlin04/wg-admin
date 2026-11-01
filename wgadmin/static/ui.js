@@ -4,7 +4,8 @@
 const BASE = new URL(".", import.meta.url).pathname;
 let root = null, onAuth = () => location.reload();
 let PROFILES = [], SCHEDULES = [], tagFilter = "", info = null;
-const PICKED = new Set();  // device names ticked for "Email owners"
+const PICKED = new Set();  // device names ticked for "Email owners" and "Bulk edit"
+const BULK = { open: false, on: {}, val: {} };  // the Bulk edit panel survives re-renders (map wg-admin-bulk)
 
 const $ = (id) => root.querySelector("#" + id);
 function el(tag, cls, text) {
@@ -83,7 +84,23 @@ const MARKUP = `
     <button type="button" class="segbtn" data-vview="devices" aria-pressed="true">Devices</button>
     <button type="button" class="segbtn vpnadmin" data-vview="server" aria-pressed="false">Server settings</button>
     <button type="button" class="segbtn vpnadmin" data-vview="groups" aria-pressed="false">Groups</button>
-    <button type="button" class="segbtn vpnadmin" data-vview="users" aria-pressed="false">Users</button></div>
+    <button type="button" class="segbtn vpnadmin" data-vview="users" aria-pressed="false">Users</button>
+    <button type="button" class="segbtn vpnadmin" data-vview="log" aria-pressed="false">Log</button></div>
+  <!-- Log (map wg-admin-log): admins only; connection log, kernel WireGuard messages, admin actions -->
+  <div class="vpnview" id="vpnvlog" hidden>
+  <div class="pagehead vpnphead"><div><h2>Log</h2><p>Connections (connect, handshake, roam, end), WireGuard's own
+    handshake messages and admin actions, newest first. Problems are marked: "Invalid handshake" = wrong or old key on
+    the device; "did not complete" = the device stopped answering; nothing at all = its packets never reach the server.</p></div>
+    <div class="userrow-actions"><button class="btn sm" id="vpnlrun" type="button">Refresh</button></div></div>
+  <form class="vpnlisthead" id="vpnlform">
+    <input class="input vpnq" id="vpnlq" type="search" placeholder="Search: device, IP, word" aria-label="Search the log" autocomplete="off" autocapitalize="none" spellcheck="false">
+    <select class="input vpnsel" id="vpnlkind" aria-label="Kind"><option value="">All kinds</option><option value="warn">Problems only</option>
+      <option value="conn">Connections</option><option value="wireguard">WireGuard handshakes</option><option value="admin">Admin actions</option></select>
+    <select class="input vpnsel" id="vpnlhours" aria-label="Period"><option value="1">Last hour</option><option value="6">Last 6 h</option>
+      <option value="24" selected>Last 24 h</option><option value="72">Last 3 days</option><option value="168">Last 7 days</option></select>
+    <span class="meta" id="vpnlmsg" role="status"></span></form>
+  <div id="vpnlbox"><div class="nodata">Loading…</div></div>
+  </div>
   <!-- Groups + Users (map wg-admin-groups): admins only; the server refuses everyone else -->
   <div class="vpnview" id="vpnvgroups" hidden>
   <div class="pagehead vpnphead"><div><h2>Groups</h2><p>Devices grouped for group admins. A group admin manages only
@@ -176,6 +193,7 @@ const MARKUP = `
   <section class="userpanel" id="vpnqrbox" hidden aria-live="polite"></section>
   <div class="vpnlisthead"><input class="input vpnq" id="vpndq" type="search" placeholder="Filter devices" aria-label="Filter devices" autocomplete="off" spellcheck="false">
     <span class="userrow-actions" id="vpndbar"></span></div>
+  <div class="factform vpnsetbox" id="vpnsetbox" hidden></div>
   <div id="vpnbox"><div class="nodata">Loading…</div></div>
   </div>
   <div class="vpnview" id="vpnvprofiles" hidden>
@@ -314,6 +332,24 @@ const MARKUP = `
   </form>
   <p class="meta" id="vpnmtmsg" role="status"></p>
   <div id="vpnmbox"><div class="nodata">Loading…</div></div>
+  <div class="pagehead vpnphead"><div><h2>Logging</h2><p>Connections, handshakes and admin actions are kept on this
+    server for the Log tab, rotated daily. A syslog server can get a copy too; when it is slow or down the lines wait in
+    a queue, and the local log and the Log tab keep working.</p></div>
+    <div class="userrow-actions"><button class="btn sm" id="vpnledit" type="button" aria-expanded="false" aria-controls="vpnlgform">Edit</button></div></div>
+  <form id="vpnlgform" class="factform" hidden>
+    <h2>Edit logging</h2>
+    <label for="vpnlgdays">Keep the local log (days)</label>
+    <input class="input" id="vpnlgdays" type="number" min="1" max="365" required>
+    <label for="vpnlghost">Syslog server (empty = none)</label>
+    <input class="input" id="vpnlghost" maxlength="253" autocomplete="off" placeholder="syslog.example.org" autocapitalize="none" spellcheck="false">
+    <label for="vpnlgport">Port</label>
+    <input class="input" id="vpnlgport" type="number" min="1" max="65535" required>
+    <label for="vpnlgproto">Protocol</label>
+    <select class="input" id="vpnlgproto"><option value="udp">UDP</option><option value="tcp">TCP</option></select>
+    <div><button class="btn primary sm" type="submit">Save</button>
+      <button class="btn ghost sm" type="button" id="vpnlgcancel">Cancel</button> <span id="vpnlgmsg" class="meta" role="status"></span></div>
+  </form>
+  <div id="vpnlgbox"><div class="nodata">Loading…</div></div>
   </div>
   </div>
   <!-- Info box (owner 2026-10-27): what this is + short how-tos, right of everything -->
@@ -437,7 +473,7 @@ async function saveBulk(ev) {
 }
 
 // List tables (owner 2026-10-27): a filter box filters as you type, PAGE rows per page with prev/next.
-const PAGE = 15;
+const PAGE = 25;  // default rows per page (paged)
 const PAGES = { devices: 0, profiles: 0, schedules: 0 };
 // hit(item, term): optional extra match beyond the text, e.g. an IP inside a profile's routes
 function matching(items, inputId, text, hit) {
@@ -462,10 +498,33 @@ function reaches(p, term) {
   return ((p.allow || []).length ? [...p.allow, ...p.dns] : p.routes).some((c) => inCidr(ip, c));
 }
 // -> [rows of the current page, pager element (empty when one page is enough)]
+// Rows per page, chosen under each list and kept in this browser; 0 = all.
+const PAGE_SIZES = [10, 25, 50, 100, 0];
+function pageSize(key) {
+  try {
+    const v = localStorage.getItem(`wgadmin-page-${key}`);
+    if (v !== null && PAGE_SIZES.includes(Number(v))) return Number(v);
+  } catch { /* storage blocked: default */ }
+  return PAGE;
+}
 function paged(key, items, rerender) {
-  const pages = Math.max(1, Math.ceil(items.length / PAGE));
+  const size = pageSize(key) || items.length || 1;
+  const pages = Math.max(1, Math.ceil(items.length / size));
   PAGES[key] = Math.min(PAGES[key], pages - 1);
   const at = PAGES[key], nav = el("div", "userrow-actions vpnpager");
+  if (items.length) {
+    const sel = el("select", "input vpnsel"), lbl = el("label", "meta");
+    fillSelect(sel, PAGE_SIZES.map((n) => [String(n), n ? String(n) : "All"]));
+    sel.value = String(pageSize(key));
+    sel.setAttribute("aria-label", "Rows per page");
+    sel.onchange = () => {
+      try { localStorage.setItem(`wgadmin-page-${key}`, sel.value); } catch { /* kept for this view only */ }
+      PAGES[key] = 0;
+      rerender();
+    };
+    lbl.append("Show", sel, "per page");
+    nav.appendChild(lbl);
+  }
   if (pages > 1) {
     const go = (label, to) => {
       const b = el("button", "btn sm", label);
@@ -474,9 +533,9 @@ function paged(key, items, rerender) {
       b.onclick = () => { PAGES[key] = to; rerender(); };
       return b;
     };
-    nav.append(go("Previous", at - 1), el("span", "meta", `${at * PAGE + 1}–${Math.min((at + 1) * PAGE, items.length)} of ${items.length}`), go("Next", at + 1));
+    nav.append(go("Previous", at - 1), el("span", "meta", `${at * size + 1}–${Math.min((at + 1) * size, items.length)} of ${items.length}`), go("Next", at + 1));
   }
-  return [items.slice(at * PAGE, (at + 1) * PAGE), nav];
+  return [items.slice(at * size, (at + 1) * size), nav];
 }
 
 function renderProfiles() {
@@ -694,30 +753,44 @@ function renderPeers() {
   }
   const tagged = d.peers.filter((p) => !tagFilter || (tagFilter === "-" ? !p.tags.length : p.tags.includes(tagFilter)));
   const shown = matching(tagged, "vpndq", (p) => [p.name, p.address, p.email, p.profile, p.schedule, ...p.tags].join(" "));
-  for (const n of [...PICKED]) if (!d.peers.some((p) => p.name === n)) PICKED.delete(n);
+  const [rows, nav] = paged("devices", shown, renderPeers);
+  // Ticks hold only for the rows on screen: a filter or page change drops the others, so Email owners and Bulk edit
+  // never reach a device the admin can't see.
+  for (const n of [...PICKED]) if (!rows.some((p) => p.name === n)) PICKED.delete(n);
   const bar = $("vpndbar"), all = el("input"), mailBtn = el("button", "btn sm");
   all.type = "checkbox";
-  all.setAttribute("aria-label", "Tick all matching devices");
-  all.checked = shown.length > 0 && shown.every((p) => PICKED.has(p.name));
-  all.onchange = () => { for (const p of shown) all.checked ? PICKED.add(p.name) : PICKED.delete(p.name); renderPeers(); };
+  all.setAttribute("aria-label", "Tick all devices in the list");
+  all.onchange = () => { for (const p of rows) all.checked ? PICKED.add(p.name) : PICKED.delete(p.name); renderPeers(); };
   mailBtn.type = "button";
   mailBtn.textContent = `Email owners (${PICKED.size})`;
   mailBtn.disabled = !PICKED.size;
   mailBtn.onclick = () => notify([...PICKED]);
-  const allLbl = el("label", "meta");
-  allLbl.append(all, " all matching");
-  bar.append(allLbl, mailBtn);
+  const setBtn = el("button", "btn sm" + (BULK.open ? " on" : ""));
+  setBtn.type = "button";
+  setBtn.id = "vpnsetbtn";
+  setBtn.setAttribute("aria-expanded", String(BULK.open));
+  setBtn.setAttribute("aria-controls", "vpnsetbox");
+  setBtn.onclick = () => { BULK.open = !BULK.open; renderPeers(); };
+  const count = () => {
+    const n = PICKED.size;  // header box: all, none or some (indeterminate)
+    all.checked = n > 0 && n === rows.length;
+    all.indeterminate = n > 0 && n < rows.length;
+    mailBtn.textContent = `Email owners (${PICKED.size})`; mailBtn.disabled = !PICKED.size; setBtn.textContent = `Bulk edit (${PICKED.size})`; bulkCount();
+  };
+  count();
+  bar.append(mailBtn, setBtn);
+  renderBulk();
   if (!shown.length) { box.replaceChildren(chips, el("div", "nodata", "No device matches the filter.")); return; }
-  const [rows, nav] = paged("devices", shown, renderPeers);
   const wrap = el("div", "tablewrap"), t = el("table");
-  t.innerHTML = "<thead><tr><th aria-label=\"Tick\"></th><th>Device</th><th>Profile</th><th>Last handshake</th><th></th></tr></thead>";
+  t.innerHTML = "<thead><tr><th></th><th>Device</th><th>Profile</th><th>Last handshake</th><th></th></tr></thead>";
+  t.querySelector("th").appendChild(all);
   const tb = el("tbody"), now = Date.now() / 1000;
   for (const p of rows) {
     const tr = el("tr"), tick = el("td"), cb = el("input"), who = el("td"), prof = el("td"), seen = el("td");
     cb.type = "checkbox";
     cb.checked = PICKED.has(p.name);
     cb.setAttribute("aria-label", `Tick ${p.name}`);
-    cb.onchange = () => { cb.checked ? PICKED.add(p.name) : PICKED.delete(p.name); mailBtn.textContent = `Email owners (${PICKED.size})`; mailBtn.disabled = !PICKED.size; };
+    cb.onchange = () => { cb.checked ? PICKED.add(p.name) : PICKED.delete(p.name); count(); };
     tick.appendChild(cb);
     tr.appendChild(tick);
     who.append(el("strong", "", p.name), el("div", "meta mono", p.address));
@@ -791,6 +864,7 @@ function renderPeers() {
     btn("Tags", () => act(p, "tags"));
     btn("Owner", () => act(p, "email"));
     if (p.email) btn("Notify", () => notify([p.name]));
+    if (isAdmin()) btn("Log", () => openLog(p.name));
     btn("Revoke", () => act(p, "remove"), "danger");
     acts.appendChild(row);
     tr.appendChild(acts);
@@ -799,6 +873,82 @@ function renderPeers() {
   t.appendChild(tb);
   wrap.appendChild(t);
   box.replaceChildren(chips, wrap, nav);
+}
+
+// Bulk edit (api/peers/apply, map wg-admin-bulk): tick the settings to change, set their values, apply all of them
+// to every ticked device in one go; the server checks each device as single edits (Enabled last) and reports the
+// ones it refused.
+const BULK_SETTINGS = [["profile", "Profile"], ["group", "Group"], ["schedule", "Schedule"], ["enabled", "Enabled"],
+  ["tags", "Tags (replace)"], ["tags-add", "Tags (add)"], ["tags-remove", "Tags (remove)"], ["email", "Owner email"]];
+const BULK_REIMPORT = new Set(["profile"]);  // settings that rewrite the device's config: it must import it again
+function bulkValues(setting) {
+  if (setting === "profile") return PROFILES.map((p) => [p.name, p.name]);
+  if (setting === "group") return [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((g) => [g.name, g.name])];
+  if (setting === "schedule") return [["", "no schedule"], ...SCHEDULES.map((s) => [s.name, s.name])];
+  if (setting === "enabled") return [["on", "on"], ["off", "off"]];
+  return null;  // free text: tags, email
+}
+const bulkChanges = () => BULK_SETTINGS.filter(([k]) => BULK.on[k]).map(([k]) => ({ setting: k, value: (BULK.val[k] || "").trim() }));
+function bulkCount() {
+  const btn = $("vpnsetapply"), n = bulkChanges().length;
+  if (!btn) return;
+  btn.textContent = `Apply ${n || ""} ${n === 1 ? "setting" : "settings"} to ${PICKED.size} device${PICKED.size === 1 ? "" : "s"}`.replace("  ", " ");
+  btn.disabled = !PICKED.size || !n;
+}
+// The panel under the filter row: one row per setting (tick + value); editing a value ticks its row.
+function renderBulk() {
+  const box = $("vpnsetbox");
+  box.hidden = !BULK.open;
+  if (box.hidden) { box.replaceChildren(); return; }
+  const rows = el("div", "vpnbrows");
+  for (const [k, label] of BULK_SETTINGS) {
+    const row = el("div", "vpnbrow"), lbl = el("label"), cb = el("input"), pairs = bulkValues(k);
+    cb.type = "checkbox";
+    cb.checked = !!BULK.on[k];
+    const v = el(pairs ? "select" : "input", "input");
+    if (pairs) {
+      fillSelect(v, pairs);
+      if (pairs.some(([x]) => x === BULK.val[k])) v.value = BULK.val[k];
+      BULK.val[k] = v.value;
+    } else {
+      v.value = BULK.val[k] || "";
+      v.placeholder = k === "email" ? "owner@example.org (empty = none)" : k === "tags" ? "tag1, tag2 (empty = none)" : "tag1, tag2";
+    }
+    v.disabled = !cb.checked;
+    v.setAttribute("aria-label", `New ${label.toLowerCase()}`);
+    cb.onchange = () => { BULK.on[k] = cb.checked; v.disabled = !cb.checked; if (cb.checked) v.focus(); bulkCount(); };
+    v[pairs ? "onchange" : "oninput"] = () => { BULK.val[k] = v.value; };
+    lbl.append(cb, ` ${label}`);
+    if (BULK_REIMPORT.has(k)) lbl.append(" *", el("span", "pill warn", "re-import"));
+    row.append(lbl, v);
+    rows.appendChild(row);
+  }
+  const apply = el("button", "btn primary sm"), clear = el("button", "btn ghost sm", "Clear"), close = el("button", "btn ghost sm", "Close");
+  apply.id = "vpnsetapply";
+  for (const b of [apply, clear, close]) b.type = "button";
+  apply.onclick = applyBulk;
+  clear.onclick = () => { BULK.on = {}; BULK.val = {}; renderBulk(); };
+  close.onclick = () => { BULK.open = false; renderPeers(); };
+  const foot = el("div");
+  foot.append(apply, " ", clear, " ", close);
+  box.replaceChildren(el("h2", "", "Bulk edit the selected devices"),
+    el("p", "hint", "Tick the settings to change and set their values; the rest stay as they are. All of them go to every ticked device in one go (Enabled last)."),
+    rows, el("p", "hint", "* re-import: the device must import its config again (QR or .conf); the device list marks it."), foot);
+  bulkCount();
+}
+async function applyBulk() {
+  const names = [...PICKED], changes = bulkChanges();
+  const label = (k) => BULK_SETTINGS.find(([x]) => x === k)[1];
+  const off = changes.some((c) => c.setting === "enabled" && c.value === "off");
+  const cuts = (off ? "\nThey lose VPN access at once." : "") +
+    (changes.some((c) => BULK_REIMPORT.has(c.setting)) ? "\nEach must import its new config afterwards (re-import)." : "");
+  const what = changes.map((c) => `  ${label(c.setting)} = ${c.value || "none"}`).join("\n");
+  if (!confirm(`Set on ${names.length} device(s) (${names.join(", ")}):\n${what}${cuts}`)) return;
+  try {
+    const d = await api("api/peers/apply", { method: "POST", body: JSON.stringify({ names, changes }) });
+    alert(`${d.done.length} of ${names.length} done.` + (d.failed.length ? "\nNot changed:\n" + d.failed.map((f) => `${f.name}: ${f.error}`).join("\n") : ""));
+  } catch (x) { alert(x.message); }
+  loadPeers();
 }
 
 // Notice mail (api/mail/notice): one mail per owner address, no keys; devices without an owner are skipped.
@@ -1234,6 +1384,41 @@ async function saveMail(ev) {
   try { renderMail(await api("api/mail", { method: "PUT", body: JSON.stringify(body) })); mailForm(false); }
   catch (x) { $("vpnmmsg").textContent = x.message; }
 }
+// Logging settings (api/logging, map wg-admin-log): local days, syslog forward, sizes to judge the days by
+let LOGCFG = {};
+function renderLogging(g) {
+  LOGCFG = g;
+  const fwd = g.host ? `${g.host}:${g.port} ${g.proto.toUpperCase()}` + (g.queued ? ` (${bytes(g.queued)} queued: server not reached)` : "") : "none";
+  const rows = [["Local log", `${g.days} days, ${bytes(g.bytes)} now` + (g.oldest ? `, since ${new Date(g.oldest).toLocaleDateString()}` : "")],
+                ["Per day", `today ${bytes(g.today)}` + (g.yesterday ? `, yesterday ${bytes(g.yesterday)}` : "")],
+                ["Syslog server", fwd], ["rsyslog", g.rsyslog || "unknown"]];
+  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
+  for (const [k, v] of rows) { const tr = el("tr"); tr.append(el("th", "", k), el("td", "mono vpnval", v)); tb.appendChild(tr); }
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  $("vpnlgbox").replaceChildren(wrap);
+}
+async function loadLogging() {
+  try { renderLogging(await api("api/logging")); } catch (x) { $("vpnlgbox").replaceChildren(el("div", "nodata", x.message)); }
+}
+function loggingForm(open) {
+  $("vpnlgform").hidden = !open;
+  $("vpnledit").setAttribute("aria-expanded", String(open));
+  if (!open) return;
+  $("vpnlgdays").value = LOGCFG.days || 30;
+  $("vpnlghost").value = LOGCFG.host || "";
+  $("vpnlgport").value = LOGCFG.port || 514;
+  $("vpnlgproto").value = LOGCFG.proto || "udp";
+  $("vpnlgmsg").textContent = "";
+  $("vpnlgdays").focus();
+}
+async function saveLogging(ev) {
+  ev.preventDefault();
+  const body = { days: Number($("vpnlgdays").value), host: $("vpnlghost").value.trim(), port: Number($("vpnlgport").value), proto: $("vpnlgproto").value };
+  $("vpnlgmsg").textContent = "Saving…";
+  try { renderLogging(await api("api/logging", { method: "PUT", body: JSON.stringify(body) })); loggingForm(false); }
+  catch (x) { $("vpnlgmsg").textContent = x.message; }
+}
 async function testMail() {
   const to = prompt("Send a test mail to:", MAIL.from_addr || "");
   if (to === null) return;
@@ -1245,6 +1430,43 @@ async function testMail() {
 function showView(name) {
   for (const b of root.querySelectorAll("[data-vview]")) b.setAttribute("aria-pressed", String(b.dataset.vview === name));
   for (const v of root.querySelectorAll(".vpnview")) v.hidden = v.id !== "vpnv" + name;
+  if (name === "log") loadLog();
+}
+
+// Log tab (api/log, map wg-admin-log): the server filters (search words, kind, period); loaded when the tab opens
+const LOGKIND = { conn: "connection", wireguard: "WireGuard", admin: "admin" };
+let logTimer = 0;
+async function loadLog() {
+  const q = new URLSearchParams({ hours: $("vpnlhours").value, kind: $("vpnlkind").value, q: $("vpnlq").value.trim(), limit: "1000" });
+  $("vpnlmsg").textContent = "Loading…";
+  try { renderLog(await api("api/log?" + q)); }
+  catch (x) { $("vpnlmsg").textContent = ""; $("vpnlbox").replaceChildren(el("div", "nodata", x.message)); }
+}
+function renderLog(d) {
+  $("vpnlmsg").textContent = d.total > d.rows.length ? `newest ${d.rows.length} of ${d.total}` : `${d.total} lines`;
+  if (!d.rows.length) { $("vpnlbox").replaceChildren(el("div", "nodata", "Nothing in this period for this search.")); return; }
+  const wrap = el("div", "tablewrap"), t = el("table", "vpnlog"), tb = el("tbody");
+  t.innerHTML = "<thead><tr><th>Time</th><th>Device</th><th>Kind</th><th>Event</th></tr></thead>";
+  for (const r of d.rows) {
+    const tr = el("tr"), dev = el("td"), kind = el("td");
+    if (r.peer) {
+      const a = el("button", "btn sm ghost", r.peer);
+      a.type = "button";
+      a.title = "Show only this device";
+      a.onclick = () => openLog(r.peer);
+      dev.appendChild(a);
+    } else dev.textContent = "-";
+    kind.appendChild(el("span", "pill " + (r.warn ? "warn" : "nodot"), r.warn ? "problem" : LOGKIND[r.kind] || r.kind));
+    tr.append(el("td", "meta", new Date(r.time).toLocaleString()), dev, kind, el("td", "mono", r.text));
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  $("vpnlbox").replaceChildren(wrap);
+}
+function openLog(name) {
+  $("vpnlq").value = name;
+  showView("log");
 }
 
 // Roles (map wg-admin-groups): the state says who is asking; admin-only parts are hidden for group admins (the
@@ -1448,7 +1670,7 @@ async function savePolicy() {
 }
 
 export function reload() {
-  loadPeers().then(() => { if (isAdmin()) { loadHealth(); loadServer(); loadNetwork(); loadMail(); loadGroups(); loadUsers(); } });
+  loadPeers().then(() => { if (isAdmin()) { loadHealth(); loadServer(); loadNetwork(); loadMail(); loadLogging(); loadGroups(); loadUsers(); } });
 }
 
 // opts.onAuth: called when the API says "sign in required" (standalone page: show the login; portal: reload).
@@ -1474,6 +1696,13 @@ export function mount(target, opts = {}) {
   $("vpnmcancel").onclick = () => mailForm(false);
   $("vpnmform").onsubmit = saveMail;
   $("vpnmtest").onclick = testMail;
+  $("vpnledit").onclick = () => loggingForm($("vpnlgform").hidden);
+  $("vpnlgcancel").onclick = () => loggingForm(false);
+  $("vpnlgform").onsubmit = saveLogging;
+  $("vpnlform").onsubmit = (ev) => { ev.preventDefault(); loadLog(); };
+  $("vpnlrun").onclick = loadLog;
+  $("vpnlkind").onchange = $("vpnlhours").onchange = loadLog;
+  $("vpnlq").oninput = () => { clearTimeout(logTimer); logTimer = setTimeout(loadLog, 400); };
   for (const b of $("vpnptpl").querySelectorAll("button")) b.onclick = () => useTemplate(b.dataset.tpl);
   const bulk = (open) => { $("vpnbform").hidden = !open; $("vpnbulkbtn").setAttribute("aria-expanded", String(open)); };
   $("vpnbulkbtn").onclick = () => { showView("devices"); bulk($("vpnbform").hidden); $("vpnbmsg").textContent = ""; $("vpnblines").focus(); };

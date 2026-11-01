@@ -3,6 +3,15 @@
 .vpnsel { min-width: 7.5em; }
 .vpnwho { min-width: 12em; }
 .vpnschedsel { display: block; margin-top: var(--s1); }
+/* Device bar (ui.js renderPeers): tick-all, mail, "Bulk edit" on one wrapping row */
+#vpndbar { flex-wrap: wrap; align-items: center; }
+#vpndbar .input { width: auto; max-width: 14em; }
+/* Bulk edit panel (ui.js renderBulk): tick + setting name left, value right; one column on phones */
+.vpnsetbox { margin-bottom: var(--s3); }
+.vpnbrows { display: grid; gap: var(--s2); }
+.vpnbrow { display: grid; grid-template-columns: 14em minmax(0, 22em); align-items: center; gap: var(--s2); }
+.factform .vpnbrow label { font-size: var(--fs-sm); color: var(--text); white-space: nowrap; display: flex; align-items: center; gap: var(--s1); }.vpnbrow .input:disabled { opacity: .5; }
+@media (max-width: 520px) { .vpnbrow { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 /* On/off slider for VPN access (ui.js peer rows): green on, grey off */
 .vpnswitch { position: relative; width: 40px; height: 22px; flex: none; padding: 0; border: 0;
   border-radius: 11px; background: var(--surface-3); cursor: pointer; transition: background .15s; }
@@ -37,7 +46,12 @@
 /* List tables: filter box top left, pager under the table */
 .vpnlisthead { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin: var(--s3) 0 var(--s2); }
 .vpnlisthead .input.vpnq { width: 16em; max-width: 100%; }
-.vpnpager { margin-top: var(--s2); }
+.vpnpager { margin-top: var(--s2); align-items: center; }
+.vpnpager label { display: inline-flex; align-items: center; gap: var(--s1); margin: 0; }
+.vpnpager .input { width: auto; min-width: 0; }
+/* Log tab (ui.js renderLog): long WireGuard lines wrap inside the event column */
+.vpnlog td.mono { white-space: normal; overflow-wrap: anywhere; font-size: var(--fs-xs); }
+.vpnlog td.meta { white-space: nowrap; }
 .vpnfwalways { margin: 0 0 var(--s3); padding-left: 1.1em; display: grid; gap: 2px; }
 /* Firewall rule editor: destination, protocol, port, remove per row */
 .vpnfwedit { display: grid; gap: var(--s2); }

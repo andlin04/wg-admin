@@ -29,6 +29,10 @@
 #   vpn-peer network-set nat|route IN_IF OUT_IF GW   NAT or routed IPv4; IN_IF = WireGuard UDP + own traffic;
 #                                 route with OUT_IF != IN_IF: peers' IPv4 policy-routed to GW on OUT_IF ("-" = none)
 #   vpn-peer ruleset              the generated $NFT (read-only)
+#   vpn-peer log HOURS            the VPN log's lines of the last 1-168 h, newest 5000 (read-only; wg-admin's Log
+#                                 tab): wg-conn (wg-connlog.sh), kernel WireGuard messages, wg-admin audit
+#   vpn-peer logging              key=value: local log days, syslog forward, sizes (read-only)
+#   vpn-peer logging-set DAYS HOST|- PORT udp|tcp   keep the local VPN log DAYS days; forward it to a syslog server
 #   vpn-peer firewall             rewrite + load $NFT (setup-vpn1.sh; the verbs above call it too)
 #   vpn-peer check                dry run: generate the ruleset, `nft -c` it, print it; nothing is loaded
 #   vpn-peer export FILE          root on the console only (not in vpn-gate): age-encrypted tar of /etc/wireguard and
@@ -75,6 +79,9 @@ NAT4=$(envval NAT4); NAT4=${NAT4:-on}
 # policy routing to TRANSIT_GW (routing()). Unset = $LAN. IPv6 always uses $LAN.
 OUT4=$(envval TRANSIT_IF); OUT4=${OUT4:-$LAN}
 [ "$NAT4" = off ] || OUT4=$LAN
+# INBOUND (map vps1-link): connections the router side may open to peers, SRC>DST[/tcp|udp/PORT[-PORT]],...
+# (e.g. 192.168.1.10/32>10.66.0.4/32/tcp/22). Empty = none: by default nothing reaches a peer from outside wg0.
+INBOUND=$(envval INBOUND)
 TUN4=10.66.0.0/24 RT_TABLE=66
 listen_port() { sed -n '1,/^\[Peer\]/{s/^ListenPort *= *//p}' "$CONF" | head -n1; }
 mark() { (umask 077; printf '%s\n' "$@" >> "$REIMPORT"); }
@@ -170,8 +177,22 @@ allow_rule() {
   [ "$3" = 6 ] && out=$LAN
   echo "    iifname \"wg0\" oifname \"$out\" $fam saddr $peers $match accept"
 }
+# One accept rule per INBOUND entry $1 (SRC>DST[/proto/PORT[-PORT]]), arriving on $OUT4; a malformed entry becomes a
+# comment line, so one typo never blocks the whole firewall.
+inbound_rule() {
+  local src=${1%%>*} a p proto ports
+  IFS=/ read -r a p proto ports <<<"${1#*>}"
+  local cidr='^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$'
+  if [[ $1 != *">"* || ! $src =~ $cidr || ! $a/$p =~ $cidr ]] ||
+     [[ -n $proto && ! ( $proto =~ ^(tcp|udp)$ && $ports =~ ^[0-9]{1,5}(-[0-9]{1,5})?$ ) ]]; then
+    echo "    # INBOUND entry ignored (not SRC>DST[/tcp|udp/PORT]): ${1//[^0-9a-z.\/>-]/?}"
+    return
+  fi
+  echo "    iifname \"$OUT4\" oifname \"wg0\" ip saddr $src ip daddr $a/$p${proto:+ $proto dport $ports} accept"
+}
 ruleset() {
-  local n r d v6 allow _ id peers r4 dns dns6 x sets="" rules="" nat=""
+  local n r d v6 allow _ id peers r4 dns dns6 x sets="" rules="" nat="" inbound=""
+  for x in ${INBOUND//,/ }; do inbound+="$(inbound_rule "$x")"$'\n'; done
   [ "$NAT4" = off ] && nat="meta nfproto ipv6 "
   local V6='^[0-9a-f]*:[0-9a-f:]*$'
   seed_profiles
@@ -232,7 +253,7 @@ ${sets}
   chain forward {
     type filter hook forward priority 0; policy accept;
     ct state established,related accept
-    oifname "wg0" drop
+${inbound}    oifname "wg0" drop
 ${rules}    iifname "wg0" drop
   }
   chain postrouting {
@@ -270,6 +291,40 @@ routing() {
     echo "routing: no route to $gw on $OUT4; device traffic is dropped until it is reachable" >&2
 }
 addr4() { ip -4 -o addr show dev "$1" scope global 2>/dev/null | awk '{print $4; exit}'; }
+# VPN log (map wg-admin-log, owner 2026-11-01): rsyslog keeps the VPN's lines in $VLOG for the Log tab (logrotate,
+# LOG_DAYS days) and, when SYSLOG_HOST is set, also forwards them through a disk-assisted queue: a slow or missing
+# syslog server never blocks the local file. Lines: wg-conn (wg-connlog.sh), kernel WireGuard messages, wg-admin audit.
+VLOG=/var/log/wg-admin/vpn.log
+RSYSLOG_CONF=/etc/rsyslog.d/30-wg-admin.conf
+ROTATE_CONF=/etc/logrotate.d/wg-admin
+logconf() {  # DAYS HOST|- PORT udp|tcp -> $RSYSLOG_CONF.new + $ROTATE_CONF
+  [ -d "$(dirname "$VLOG")" ] || install -d -m 750 "$(dirname "$VLOG")"
+  {
+    echo '# wg-admin VPN log, written by vpn-peer logging-set (Server settings > Logging); edits are overwritten'
+    echo 'if ($programname == "wg-conn") or ($programname == "kernel" and $msg contains "wireguard: ")'
+    echo '   or ($msg contains "wg-admin INFO audit ") then {'
+    echo "  action(type=\"omfile\" file=\"$VLOG\" template=\"RSYSLOG_FileFormat\")"
+    if [ "$2" != - ]; then
+      echo "  action(type=\"omfwd\" target=\"$2\" port=\"$3\" protocol=\"$4\" action.resumeRetryCount=\"-1\""
+      echo '         queue.type="LinkedList" queue.size="20000" queue.filename="wgadmin_fwd" queue.maxDiskSpace="100m"'
+      echo '         queue.saveOnShutdown="on" queue.timeoutEnqueue="0")'
+    fi
+    echo '}'
+  } > "$RSYSLOG_CONF.new"
+  cat > "$ROTATE_CONF" <<EOF
+$VLOG {
+  daily
+  rotate $1
+  missingok
+  notifempty
+  compress
+  delaycompress
+  postrotate
+    /usr/lib/rsyslog/rsyslog-rotate
+  endscript
+}
+EOF
+}
 
 case "$cmd" in
   add)
@@ -621,6 +676,51 @@ EOF
   ruleset)
     cat "$NFT"  # read-only: the generated firewall (no keys in it)
     ;;
+  log)
+    h=${2:-24}
+    [[ $h =~ ^[0-9]{1,3}$ ]] && (( h >= 1 && h <= 168 )) || { echo "usage: vpn-peer log HOURS (1-168)"; exit 2; }
+    # $VLOG and its rotations touched in the period (+1 day), oldest first; ISO times compare as text
+    since=$(date -d "$h hours ago" +%Y-%m-%dT%H:%M:%S)
+    find "$(dirname "$VLOG")" -maxdepth 1 -name 'vpn.log*' -mmin -$(( (h + 24) * 60 )) -printf '%T@ %p\n' 2>/dev/null \
+      | sort -n | cut -d' ' -f2- | while read -r f; do zcat -f "$f"; done \
+      | awk -v s="$since" 'substr($1, 1, 19) >= s' | tail -n 5000 || true
+    ;;
+  logging)
+    # read-only key=value for Server settings > Logging
+    echo "days=$(envval LOG_DAYS)"; echo "host=$(envval SYSLOG_HOST)"
+    echo "port=$(envval SYSLOG_PORT)"; echo "proto=$(envval SYSLOG_PROTO)"
+    echo "bytes=$(du -cb "$(dirname "$VLOG")"/vpn.log* 2>/dev/null | awk 'END {print $1 + 0}')"
+    echo "today=$(stat -c %s "$VLOG" 2>/dev/null || echo 0)"
+    echo "yesterday=$(stat -c %s "$VLOG.1" 2>/dev/null || echo 0)"
+    echo "oldest=$(ls -1t "$(dirname "$VLOG")"/vpn.log* 2>/dev/null | tail -n1 | xargs -r zcat -f | head -n1 | cut -c1-19)"
+    echo "queued=$(du -cb /var/spool/rsyslog/wgadmin_fwd* 2>/dev/null | awk 'END {print $1 + 0}')"
+    echo "rsyslog=$(systemctl is-active rsyslog 2>/dev/null || true)"
+    ;;
+  logging-set)
+    # DAYS HOST PORT PROTO: local days 1-365; HOST "-" = no forward. Checked with rsyslogd -N1, else the old config stays.
+    days=${2:-} host=${3:-} port=${4:-} proto=${5:-}
+    [[ $days =~ ^[0-9]{1,3}$ ]] && (( 10#$days >= 1 && 10#$days <= 365 )) || { echo "days: 1-365"; exit 2; }
+    [[ $host =~ ^(-|[A-Za-z0-9.-]{1,253}|[0-9a-f:]{2,39})$ ]] || { echo "syslog server: host name or IP, - = none"; exit 2; }
+    [[ $port =~ ^[0-9]{1,5}$ ]] && (( 10#$port >= 1 && 10#$port <= 65535 )) || { echo "port: 1-65535"; exit 2; }
+    [[ $proto =~ ^(udp|tcp)$ ]] || { echo "protocol: udp or tcp"; exit 2; }
+    days=$((10#$days)) port=$((10#$port))
+    command -v rsyslogd >/dev/null || { echo "rsyslog not installed (apt-get install rsyslog logrotate)"; exit 1; }
+    logconf "$days" "$host" "$port" "$proto"
+    [ -f "$RSYSLOG_CONF" ] && cp -p "$RSYSLOG_CONF" "$RSYSLOG_CONF.prev"
+    mv "$RSYSLOG_CONF.new" "$RSYSLOG_CONF"
+    if ! rsyslogd -N1 >/dev/null 2>&1; then
+      if [ -f "$RSYSLOG_CONF.prev" ]; then mv "$RSYSLOG_CONF.prev" "$RSYSLOG_CONF"; else rm -f "$RSYSLOG_CONF"; fi
+      echo "logging not changed: rsyslog refused the config"; exit 1
+    fi
+    rm -f "$RSYSLOG_CONF.prev"
+    (umask 077; { grep -Ev '^(LOG_DAYS|SYSLOG_HOST|SYSLOG_PORT|SYSLOG_PROTO)=' "$ENV" 2>/dev/null || true
+                  printf 'LOG_DAYS=%s\nSYSLOG_HOST=%s\nSYSLOG_PORT=%s\nSYSLOG_PROTO=%s\n' "$days" "$host" "$port" "$proto"; } > "$ENV.new")
+    mv "$ENV.new" "$ENV"
+    systemctl restart rsyslog
+    fwd=$([ "$host" = - ] && echo "no forward" || echo "forward to $host:$port/$proto")
+    logger -t vpn-peer "logging-set keep $days days, $fwd"
+    echo "logging saved: local log kept $days days, $fwd"
+    ;;
   firewall)
     peers6; firewall
     echo "firewall: $NFT loaded"
@@ -663,5 +763,5 @@ EOF
     echo "imported $in: $(grep -c '^# name: ' "$CONF" || true) peers; old state:${moved:- none} -> .before-import-$ts"
     echo "next: bash setup-vpn1.sh (owners, firewall, services), then systemctl restart wg-quick@wg0 wg-admin"
     ;;
-  *) echo "usage: vpn-peer add|profile|tags|conf|qr|remove|list|dump|profiles|profile-set|profile-del|health|server|server-set|ruleset|firewall|check|export|import [NAME] ..."; exit 2 ;;
+  *) echo "usage: vpn-peer add|profile|tags|conf|qr|remove|list|dump|profiles|profile-set|profile-del|health|server|server-set|ruleset|log|logging|logging-set|firewall|check|export|import [NAME] ..."; exit 2 ;;
 esac

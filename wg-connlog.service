@@ -1,0 +1,9 @@
+[Unit]
+Description=VPN connection log (deploy/vpn/wg-connlog.sh)
+After=wg-quick@wg0.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/wg-connlog
+# Its own wg-conn lines are notice; systemd's start/finish lines every 30 s (info) stay out of the journal and log1.
+LogLevelMax=notice

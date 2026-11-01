@@ -15,9 +15,10 @@ case ${1:-} in
 esac
 [ "$(id -u)" = 0 ] || { echo "uninstall.sh: run as root" >&2; exit 1; }
 
-systemctl disable -q --now wg-admin wg-metrics.timer wg-quick@wg0 2>/dev/null || true
-systemctl stop wg-metrics.service 2>/dev/null || true
-rm -f /etc/systemd/system/wg-admin.service /etc/systemd/system/wg-metrics.service /etc/systemd/system/wg-metrics.timer
+systemctl disable -q --now wg-admin wg-metrics.timer wg-connlog.timer wg-quick@wg0 2>/dev/null || true
+systemctl stop wg-metrics.service wg-connlog.service 2>/dev/null || true
+rm -f /etc/systemd/system/wg-admin.service /etc/systemd/system/wg-metrics.service /etc/systemd/system/wg-metrics.timer \
+  /etc/systemd/system/wg-connlog.service /etc/systemd/system/wg-connlog.timer
 rm -rf /etc/systemd/system/wg-quick@wg0.service.d
 systemctl daemon-reload
 
@@ -33,8 +34,11 @@ rm -f /etc/nftables.d/wgadmin.nft
 rm -f /etc/sysctl.d/90-wireguard.conf  # forwarding stays on until the next reboot (or sysctl net.ipv4.ip_forward=0)
 
 rm -rf /opt/wg-admin /opt/wg-admin.new
-rm -f /usr/local/sbin/vpn-peer /usr/local/sbin/vpn-gate /usr/local/sbin/wg-metrics /etc/sudoers.d/wg-admin
+rm -f /usr/local/sbin/vpn-peer /usr/local/sbin/vpn-gate /usr/local/sbin/wg-metrics /usr/local/sbin/wg-connlog /etc/sudoers.d/wg-admin
 rm -f /var/lib/prometheus/node-exporter/wireguard.prom
+rm -rf /var/lib/wg-connlog
+rm -f /etc/rsyslog.d/30-wg-admin.conf /etc/logrotate.d/wg-admin  # the log itself stays in /var/log/wg-admin
+systemctl try-restart rsyslog 2>/dev/null || true
 id wgadmin >/dev/null 2>&1 && userdel wgadmin
 
 if [ "$purge" = 1 ]; then

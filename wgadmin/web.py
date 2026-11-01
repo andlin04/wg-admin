@@ -25,7 +25,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from . import access, mail, schedule, totp, vpn
 from .auth import COOKIE, USER, Auth, CodeRequired, check_password
@@ -139,6 +139,31 @@ class BulkIn(BaseModel):
     lines: str = Field(min_length=1, max_length=10000)
 
 
+BULK_ORDER = ("profile", "group", "schedule", "tags", "tags-add", "tags-remove", "email", "enabled")
+
+
+class ChangeIn(BaseModel):
+    """One setting of a bulk edit. enabled: "on"/"off"; tags, tags-add, tags-remove: comma-separated; "" clears
+    profile-less settings (group, schedule, tags, email)."""
+    setting: str = Field(pattern="^(profile|group|schedule|tags|tags-add|tags-remove|email|enabled)$")
+    value: str = Field("", max_length=254)
+
+
+class ApplyIn(BaseModel):
+    """Bulk edit (map wg-admin-bulk): several settings on the ticked devices in one go, applied in BULK_ORDER
+    (enabled last, so a device is switched on with its new setup)."""
+    names: list[str] = Field(min_length=1, max_length=200)
+    changes: list[ChangeIn] = Field(min_length=1, max_length=len(BULK_ORDER))
+
+
+class LoggingIn(BaseModel):
+    """Server settings > Logging (map wg-admin-log): local VPN log kept `days`; host "" = no syslog forward."""
+    days: int = Field(30, ge=1, le=365)
+    host: str = Field("", max_length=253)
+    port: int = Field(514, ge=1, le=65535)
+    proto: str = Field("udp", pattern="^(udp|tcp)$")
+
+
 class ProfileIn(BaseModel):
     profile: str = Field(pattern=vpn.PROFILE.pattern)
 
@@ -205,7 +230,12 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     send = sender or mail.smtp_send
     now_local = clock or schedule.now_local
     auth = Auth(cfg)
-    audit = Events(sink if sink is not None else portal_sink(cfg) if cfg.event_url else None)
+    events = Events(sink if sink is not None else portal_sink(cfg) if cfg.event_url else None)
+    quiet = threading.local()  # bulk apply: per-device events keep their journal line, one summary goes to Slack
+
+    def audit(user: str, action: str, name: str, ok: bool, out: str, journal: str = "", notify: str = "") -> None:
+        events(user, action, name, ok, out, journal, "" if getattr(quiet, "on", False) else notify)
+
     sched_lock = threading.Lock()  # the 60 s check runs in a worker thread; the API edits the same file
     edit_lock = threading.Lock()  # users.json and access.json: read, change, write as one step
 
@@ -457,6 +487,38 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     def server_get(request: Request) -> dict[str, Any]:
         admin_of(request)
         return {"settings": do(vpn.server)}
+
+    @app.get("/api/log")
+    def log_get(request: Request, hours: int = 24, q: str = "", kind: str = "", limit: int = 1000) -> dict[str, Any]:
+        """Log tab (map wg-admin-log, admins): connection log, kernel WireGuard messages and admin actions of the last
+        1-168 h, newest first. q: words that must all appear (device name or text); kind: conn|wireguard|admin|warn."""
+        admin_of(request)
+        if not 1 <= hours <= 168:
+            raise HTTPException(422, "hours: 1-168")
+        rows, words = do(vpn.log, hours), q.lower().split()
+        if kind == "warn":
+            rows = [r for r in rows if r["warn"]]
+        elif kind:
+            rows = [r for r in rows if r["kind"] == kind]
+        if words:
+            rows = [r for r in rows if all(w in f"{r['peer']} {r['text']}".lower() for w in words)]
+        return {"rows": rows[:max(1, min(limit, 5000))], "total": len(rows)}
+
+    @app.get("/api/logging")
+    def logging_get(request: Request) -> dict[str, Any]:
+        admin_of(request)
+        return do(vpn.logging_view)
+
+    @app.put("/api/logging")
+    def logging_put(request: Request, body: LoggingIn) -> dict[str, Any]:
+        user = admin_of(request)
+        try:
+            vpn.logging_request(body.days, body.host, body.port, body.proto)
+        except vpn.VpnError as exc:
+            raise HTTPException(422, str(exc)) from None
+        out = do(vpn.save_logging, body.days, body.host, body.port, body.proto)
+        audit(user, "logging-set", "", True, out, f"VPN: logging changed by {user}: {out}")
+        return {"output": out, **do(vpn.logging_view)}
 
     @app.put("/api/server")
     def server_put(request: Request, body: ServerIn) -> dict[str, Any]:
@@ -878,6 +940,67 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         out = f"schedule {body.schedule or 'none'}" + (f"; switched {', '.join(switched)}" if switched else "")
         audit(user, "schedule-set", name, True, out, f"VPN: {name} set to schedule {body.schedule or 'none'} by {user}")
         return {"output": out, "peer": peer(name)}
+
+    @app.post("/api/peers/apply")
+    def peer_apply(request: Request, body: ApplyIn) -> dict[str, Any]:
+        """Bulk edit: each device through its single-device route (same checks and group scope), in order; a
+        failure stops that device (the settings before it stay set, the error names them) and skips it only. One
+        summary event."""
+        user = who(request).name
+        changes = {c.setting: c.value for c in body.changes}
+        if len(changes) < len(body.changes):
+            raise HTTPException(422, "each setting once")
+        if changes.get("enabled", "on") not in ("on", "off"):
+            raise HTTPException(422, 'enabled: value "on" or "off"')
+        if "profile" in changes and not changes["profile"]:
+            raise HTTPException(422, "profile: pick one")
+
+        def one(name: str, setting: str, value: str) -> None:
+            if setting == "profile":
+                peer_profile(request, name, ProfileIn(profile=value))
+            elif setting == "group":
+                peer_group(request, name, GroupSetIn(group=value))
+            elif setting == "schedule":
+                peer_schedule(request, name, AssignIn(schedule=value))
+            elif setting == "email":
+                peer_email(request, name, EmailIn(email=value))
+            elif setting == "enabled":
+                peer_enabled(request, name, EnabledIn(enabled=value == "on"))
+            else:
+                tags = [t for t in (x.strip().lower() for x in value.split(",")) if t]
+                have = scoped_peer(request, name)[1]["tags"]
+                new = (tags if setting == "tags" else list(dict.fromkeys(have + tags)) if setting == "tags-add" else
+                       [t for t in have if t not in tags])
+                peer_tags(request, name, TagsIn(tags=new))
+
+        order = [s for s in BULK_ORDER if s in changes]
+        done, failed = [], []
+        quiet.on = True
+        try:
+            for name in dict.fromkeys(body.names):
+                set_ = []
+                for setting in order:
+                    try:
+                        one(name, setting, changes[setting])
+                    except HTTPException as exc:
+                        err = str(exc.detail)
+                    except ValidationError as exc:  # a value the setting's own form would refuse
+                        err = f"{setting}: {exc.errors()[0]['msg']}"
+                    else:
+                        set_.append(setting)
+                        continue
+                    failed.append({"name": name, "error": err + (f" (already set: {', '.join(set_)})" if set_ else "")})
+                    break
+                else:
+                    done.append(name)
+        finally:
+            quiet.on = False
+        what = ", ".join(f"{s} = {changes[s] or 'none'}" for s in order)
+        summary = f"{what}: {len(done)} of {len(done) + len(failed)} done" + (
+            f"; failed {', '.join(f['name'] for f in failed)}" if failed else "")
+        audit(user, "bulk-set", "", not failed, summary, f"VPN: bulk edit by {user}: {summary}",
+              f":key: VPN bulk edit by {user}: {summary}")
+        return {"done": done, "failed": failed}
 
     # ---------------------------------------------------------------- groups (map wg-admin-groups): admins only
     def groups_view() -> dict[str, Any]:

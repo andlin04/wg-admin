@@ -8,14 +8,18 @@ WireGuard + nftables + wg-admin (FastAPI web UI and API; nginx TLS on :8443 -> a
 
 ## Features
 - **Devices:** add one or many (CSV), QR code for the phone app, `.conf` or a `.zip` for computers, mail the setup to
-  the owner, on/off switch, tags with filters, last handshake and traffic per device.
+  the owner, on/off switch, tags with filters, last handshake and traffic per device; bulk edit of several settings
+  on the ticked devices in one go; 10/25/50/100/All rows per page.
+- **Connection log:** connects, handshakes, roaming, session ends and WireGuard's own messages per device; admins
+  search them in the Log tab. Kept locally with logrotate, optionally forwarded to a syslog server (UDP/TCP).
 - **Connection profiles:** split tunnel (home networks only), full tunnel (all traffic), or single hosts and ports.
   Enforced on the server (nftables), not only in the client config.
 - **Schedules:** weekly hours, calendar dates, valid from / until; devices switch on and off by themselves.
 - **Users and groups:** admins and group admins (manage only their groups' devices), sign-in hours and expiry per
   account, optional authenticator app (TOTP) per account or required per role, password history.
 - **Server settings:** endpoint, port, keepalive, NAT or routed mode, transit interface, readable firewall rules with
-  an editor, mail (SMTP) settings, reboot.
+  an editor, mail (SMTP) settings, logging (days kept, syslog server), reboot.
+- **Changes:** [CHANGES.md](CHANGES.md).
 - **Health map:** devices, internet, router, VPN server and LAN/DNS with live checks.
 - **Backup:** encrypted export (age) with every key; restore on a new host keeps all devices working.
 - **API:** every UI action is an API call; tokens for scripts (`python3 -m wgadmin token NAME`).
@@ -40,6 +44,11 @@ Made-up demo data (no real names, addresses or keys).
    - Computer: **.conf** (or the `.zip` with instructions), import it in the WireGuard client.
    - **Notify** mails the owner the setup (needs Server settings > Mail).
 5. **Switch** a device off with its slider (the key stays) or **Revoke** it for good.
+   - **Several at once:** tick devices (the header box ticks all in the list on screen; ticks are dropped when a device leaves the list; "Show" under
+     the list: 10/25/50/100/All per page), **Bulk edit**, tick the settings to change
+     (profile, group, schedule, enabled, tags, owner email) and set their values, **Apply**: all of them go to every
+     ticked device in one go (enabled last). Each device gets the same checks as a single edit; refused ones are
+     listed. Settings marked * re-import need the device to import its config again.
 6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`), pick it on the device. A manual switch holds until
    the schedule's next change.
 7. **Others manage their own devices (optional):** Groups > add a group with its profiles and schedules, then
@@ -109,6 +118,9 @@ it). A second interface can carry the decrypted traffic (transit interface + nex
 vpn-peer writes one table, `inet wgadmin`, to /etc/nftables.d/wgadmin.nft and replaces only that table.
 On a host with its own /etc/nftables.conf, add `include "/etc/nftables.d/*.nft"` to it.
 Dry run: `vpn-peer check`.
+Nothing on the LAN side can open a connection to a device by default. Route mode only: to let the LAN reach a
+server-type device (SSH, metrics), set `INBOUND=SRC>DST[/tcp|udp/PORT],...` in /etc/wireguard/vpn.env, e.g.
+`INBOUND=10.1.0.10/32>10.66.0.4/32/tcp/22`, then `vpn-peer firewall`.
 
 ## Backup and restore
 - Export (root, interactive): `vpn-peer export /root/vpn-YYYYMMDD.age`. age asks for a passphrase. The file holds
