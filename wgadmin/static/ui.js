@@ -359,7 +359,7 @@ const MARKUP = `
       or other devices.</p>
     <h2>How to</h2>
     <ul class="meta">
-      <li><strong>1. Connection profiles:</strong> what a device reaches; filter by an IP to find who reaches it. Changing it needs a re-import on the device.</li>
+      <li><strong>1. Connection profiles:</strong> what a device reaches; filter by an IP to find who reaches it. Changing routes, DNS or IPv6 needs a re-import on the device; allowed destinations don't.</li>
       <li><strong>2. Schedules (optional):</strong> switch access by themselves; a manual switch holds until the next change.</li>
       <li><strong>3. Devices:</strong> Add a device with a profile and schedule, then scan the QR in the WireGuard app (or send the .zip).</li>
       <li><strong>Slider:</strong> access on/off; the setup stays.</li>
@@ -883,7 +883,14 @@ function renderPeers() {
 // ones it refused.
 const BULK_SETTINGS = [["profile", "Profile"], ["group", "Group"], ["schedule", "Schedule"], ["enabled", "Enabled"],
   ["tags", "Tags (replace)"], ["tags-add", "Tags (add)"], ["tags-remove", "Tags (remove)"], ["email", "Owner email"]];
-const BULK_REIMPORT = new Set(["profile"]);  // settings that rewrite the device's config: it must import it again
+const BULK_REIMPORT = new Set(["profile"]);  // settings that may rewrite the device's config: it may need a re-import
+// A profile switch changes the client config only when routes, DNS or IPv6 differ (vpn-peer marks only those
+// devices); allowed destinations live on the server. -> the ticked devices that will need a re-import.
+const clientSide = (name) => { const p = PROFILES.find((x) => x.name === name); return p ? [p.routes, p.dns, p.ipv6].join("|") : name; };
+const reimportNames = (names, to) => names.filter((n) => {
+  const p = (LAST?.peers || []).find((x) => x.name === n);
+  return !p || clientSide(p.profile) !== clientSide(to);
+});
 function bulkValues(setting) {
   if (setting === "profile") return PROFILES.map((p) => [p.name, p.name]);
   if (setting === "group") return [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((g) => [g.name, g.name])];
@@ -897,6 +904,12 @@ function bulkCount() {
   if (!btn) return;
   btn.textContent = `Apply ${n || ""} ${n === 1 ? "setting" : "settings"} to ${PICKED.size} device${PICKED.size === 1 ? "" : "s"}`.replace("  ", " ");
   btn.disabled = !PICKED.size || !n;
+  const ri = $("vpnbri");
+  if (ri) {
+    const k = reimportNames([...PICKED], BULK.val.profile).length;
+    ri.textContent = PICKED.size ? `re-import ${k} of ${PICKED.size}` : "may need re-import";
+    ri.className = "pill " + (PICKED.size && !k ? "ok" : "warn");
+  }
 }
 // The panel under the filter row: one row per setting (tick + value); editing a value ticks its row.
 function renderBulk() {
@@ -920,9 +933,9 @@ function renderBulk() {
     v.disabled = !cb.checked;
     v.setAttribute("aria-label", `New ${label.toLowerCase()}`);
     cb.onchange = () => { BULK.on[k] = cb.checked; v.disabled = !cb.checked; if (cb.checked) v.focus(); bulkCount(); };
-    v[pairs ? "onchange" : "oninput"] = () => { BULK.val[k] = v.value; };
+    v[pairs ? "onchange" : "oninput"] = () => { BULK.val[k] = v.value; bulkCount(); };
     lbl.append(cb, ` ${label}`);
-    if (BULK_REIMPORT.has(k)) lbl.append(" *", el("span", "pill warn", "re-import"));
+    if (BULK_REIMPORT.has(k)) { const ri = el("span", "pill warn"); ri.id = "vpnbri"; lbl.append(" *", ri); }
     row.append(lbl, v);
     rows.appendChild(row);
   }
@@ -936,15 +949,16 @@ function renderBulk() {
   foot.append(apply, " ", clear, " ", close);
   box.replaceChildren(el("h2", "", "Bulk edit the selected devices"),
     el("p", "hint", "Tick the settings to change and set their values; the rest stay as they are. All of them go to every ticked device in one go (Enabled last)."),
-    rows, el("p", "hint", "* re-import: the device must import its config again (QR or .conf); the device list marks it."), foot);
+    rows, el("p", "hint", "* May need a re-imported profile on the client: only devices whose routes, DNS or IPv6 change import their config again (QR or .conf); the device list marks them."), foot);
   bulkCount();
 }
 async function applyBulk() {
   const names = [...PICKED], changes = bulkChanges();
   const label = (k) => BULK_SETTINGS.find(([x]) => x === k)[1];
   const off = changes.some((c) => c.setting === "enabled" && c.value === "off");
+  const prof = changes.find((c) => c.setting === "profile"), ri = prof ? reimportNames(names, prof.value) : [];
   const cuts = (off ? "\nThey lose VPN access at once." : "") +
-    (changes.some((c) => BULK_REIMPORT.has(c.setting)) ? "\nEach must import its new config afterwards (re-import)." : "");
+    (ri.length ? `\nMust import the new config afterwards (re-import): ${ri.join(", ")}.` : prof ? "\nNo re-import needed." : "");
   const what = changes.map((c) => `  ${label(c.setting)} = ${c.value || "none"}`).join("\n");
   if (!confirm(`Set on ${names.length} device(s) (${names.join(", ")}):\n${what}${cuts}`)) return;
   try {

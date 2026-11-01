@@ -2,13 +2,20 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
-## 2026-11-01: block rules in a profile, profile switch without re-import
+## 2026-11-01: profile changes may need a re-imported profile on the client; bulk edit shows which devices
+
+- Only devices whose client config changes (routes, DNS or IPv6) are marked "re-import". Allowed destinations live
+  on the server: changing them, or switching between profiles that differ only there, needs no re-import.
+- Bulk edit: the Profile row shows how many ticked devices the chosen profile will mark ("re-import 2 of 3"); the
+  confirm lists them, or says no re-import is needed.
+
+## 2026-11-01: block rules in a profile; fewer re-imports on a profile switch
 
 - Allowed destinations are checked in order, first match wins; a line starting with `!` blocks. Example: the
   portal's ports, then `!192.168.0.0/16`, then `0.0.0.0/0` = the portal plus the internet, no other LAN host.
   The Firewall table shows such lines as "blocked ...".
-- Switching a device between profiles with the same routes, DNS and IPv6 changes only the server's firewall: the
-  device is no longer asked to re-import its configuration.
+- A profile switch may need a re-imported profile on the client: only when the routes, DNS or IPv6 differ. Between
+  profiles with the same ones only the server's firewall changes.
 - README screenshots retaken from the current version; new ones for bulk edit, the Log tab and Server settings >
   Logging.
 

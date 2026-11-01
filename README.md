@@ -40,7 +40,8 @@ Made-up demo data (no real names, addresses or keys).
 2. **Server settings:** check the endpoint (the public name or address and port the devices dial) and the network
    mode (NAT or Route, see below).
 3. **Connection profiles:** keep the default `split` and `full`, or add your own (routes, DNS, allowed hosts/ports).
-   Changing a profile marks its devices "re-import": they need the new QR or config.
+   Changing a profile's routes, DNS or IPv6 marks its devices "re-import": they need the new QR or config.
+   Allowed destinations live on the server: no re-import.
 4. **Devices > Add a device:** name (e.g. `anna-phone`), profile, optional group, schedule, tags and owner email.
    - Phone: install the WireGuard app, tap **QR**, scan it in the app.
    - Computer: **.conf** (or the `.zip` with instructions), import it in the WireGuard client.
@@ -50,7 +51,8 @@ Made-up demo data (no real names, addresses or keys).
      the list: 10/25/50/100/All per page), **Bulk edit**, tick the settings to change
      (profile, group, schedule, enabled, tags, owner email) and set their values, **Apply**: all of them go to every
      ticked device in one go (enabled last). Each device gets the same checks as a single edit; refused ones are
-     listed. Settings marked * re-import need the device to import its config again.
+     listed. Settings marked * may need a re-imported profile on the client: the panel and the confirm show
+     which ticked devices (only those whose routes, DNS or IPv6 change).
 6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`), pick it on the device. A manual switch holds until
    the schedule's next change.
 7. **Others manage their own devices (optional):** Groups > add a group with its profiles and schedules, then
