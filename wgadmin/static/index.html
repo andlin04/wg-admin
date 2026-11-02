@@ -11,6 +11,7 @@
 <!-- Standalone wg-admin (local login). Through the portal the same ui.js runs inside the VPN tab. -->
 <header class="topbar"><strong>VPN admin</strong><span class="meta" id="host"></span>
   <span class="who" id="who"></span>
+  <button class="btn sm ghost" type="button" id="themebtn" aria-label="Switch light or dark theme"></button>
   <button class="btn sm ghost" type="button" id="acctbtn" hidden aria-expanded="false" aria-controls="acct">Account</button>
   <button class="btn sm ghost" type="button" id="logout" hidden>Sign out</button></header>
 <main id="app">
@@ -71,8 +72,24 @@
   <div id="vpnmount"></div>
 </main>
 <script type="module">
-import { api, mount, setOnAuth } from "./ui.js";
+import { api, icon, mount, setOnAuth } from "./ui.js";
 const $ = (id) => document.getElementById(id);
+// Theme (same as the portal's): dark unless the OS asks for light; the button overrides it, kept per browser.
+const isDark = () => { const t = document.documentElement.dataset.theme;
+  return t ? t === "dark" : !matchMedia("(prefers-color-scheme: light)").matches; };
+function applyTheme(t) {
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  $("themebtn").replaceChildren(icon(isDark() ? "sun" : "moon"));
+  $("themebtn").title = isDark() ? "Switch to light theme" : "Switch to dark theme";
+}
+let savedTheme = null;
+try { savedTheme = localStorage.getItem("theme"); } catch { /* storage blocked: follow the OS */ }
+applyTheme(savedTheme);
+$("themebtn").onclick = () => {
+  const next = isDark() ? "light" : "dark";
+  try { localStorage.setItem("theme", next); } catch { /* not remembered */ }
+  applyTheme(next);
+};
 setOnAuth(() => { if ($("login").hidden) showLogin(); });  // signed out: the login form, never a reload
 function showLogin() {
   $("vpnmount").replaceChildren();

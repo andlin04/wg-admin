@@ -24,12 +24,14 @@ WireGuard + nftables + wg-admin (FastAPI web UI and API; nginx TLS on :8443 -> a
 - **Server settings:** endpoint, port, keepalive, NAT or routed mode, transit interface, readable firewall rules with
   an editor, mail (SMTP) settings, logging (days kept, syslog server), reboot.
 - **Changes:** [CHANGES.md](CHANGES.md).
+- **Dark or light theme:** button next to the user name; follows the system until picked.
 - **Health map:** devices, internet, router, VPN server and LAN/DNS with live checks.
 - **Backup:** encrypted export (age) with every key; restore on a new host keeps all devices working.
 - **API:** every UI action is an API call; tokens for scripts (`python3 -m wgadmin token NAME`).
 
 ## Screenshots
-Made-up demo data (no real names, addresses or keys).
+Made-up demo data (no real names, addresses or keys). Dark theme; the sun/moon button next to the
+user name switches to light (kept per browser; without a choice the page follows the system setting).
 
 | | |
 | --- | --- |
@@ -39,6 +41,7 @@ Made-up demo data (no real names, addresses or keys).
 | ![Bulk edit](docs/bulk.png) Bulk edit: several settings on the ticked devices in one go | ![Log](docs/log.png) Log: connections, WireGuard handshakes, admin actions |
 | ![Logging](docs/logging.png) Server settings > Logging: days kept, size per day, syslog forward | ![Device open](docs/expanded.png) A device opened: pickers, tags as ticks, actions |
 | ![Profiles open](docs/profiles-open.png) Connection profiles, all opened | ![Server open](docs/server-open.png) Server settings, all parts opened |
+| ![Devices, light](docs/devices-light.png) Light theme: devices | ![Device open, light](docs/expanded-light.png) Light theme: a device opened |
 
 ## Using it
 1. **Sign in** at `https://HOST:8443/` with the first admin account (install step 3 below).

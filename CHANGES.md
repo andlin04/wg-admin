@@ -2,6 +2,11 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-02: dark/light theme button
+
+- Sun/moon button next to the user name switches dark and light; the choice is kept per browser. Without a choice
+  the page follows the system setting (as before). Inside the portal its own theme button applies.
+
 ## 2026-11-02: Refresh button for device status
 
 - **Refresh** right above the device table (on the tag filter line, at the right) reloads device status; open rows, ticks and the page stay. Nothing
