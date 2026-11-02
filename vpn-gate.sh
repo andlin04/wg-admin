@@ -2,8 +2,8 @@
 # wg-admin's only way to root on vpn1 (installed by setup-vpn1.sh as /usr/local/sbin/vpn-gate; sudoers lets user
 # wgadmin run it): `sudo -n vpn-gate "<request>"`. Until 2026-10-26 it was the forced command of the portal's SSH key
 # (SSH_ORIGINAL_COMMAND, still read). Only these requests pass to vpn-peer; everything else is refused:
-#   dump | add NAME PROFILE | profile NAME PROFILE | tags NAME TAGS | remove NAME | conf NAME | qr NAME
-#   enable NAME | disable NAME
+#   dump | add NAME PROFILE [- DAYS] | profile NAME PROFILE | tags NAME TAGS | remove NAME | conf NAME | qr NAME
+#   enable NAME [DAYS] | disable NAME | activated NAME   (DAYS: activation deadline, 1-30 days)
 #   profiles | profile-set PROFILE ROUTES DNS v6=on|off allow=RULES [DESCRIPTION] | profile-del PROFILE | health
 #   server | ruleset | network | log HOURS | logging
 #   server-set ENDPOINT PORT KEEPALIVE | network-set nat|route IN_IF OUT_IF GW | logging-set DAYS HOST|- PORT udp|tcp
@@ -24,10 +24,13 @@ READ='^(dump|profiles|health|server|ruleset|network|logging|log [0-9]{1,3})$'  #
 if (( ${#cmd} > 800 )); then echo "refused: request too long"; exit 2
 elif [[ $cmd =~ $READ ]]; then exec "$PEER" $cmd  # word split: only "log HOURS" has a space (READ allows no other)
 elif [[ $cmd =~ ^(add|profile)\ ($N)\ ($P)$ ]]; then exec "$PEER" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+elif [[ $cmd =~ ^add\ ($N)\ ($P)\ -\ ([0-9]{1,2})$ ]]; then  # "-": no ALLOWED override; vpn-peer checks DAYS 1-30
+  exec "$PEER" add "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" - "${BASH_REMATCH[3]}"
+elif [[ $cmd =~ ^enable\ ($N)\ ([0-9]{1,2})$ ]]; then exec "$PEER" enable "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 elif [[ $cmd =~ ^tags\ ($N)\ ($G)$ ]]; then exec "$PEER" tags "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 elif [[ $cmd =~ ^email\ ($N)\ (-|[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{3,190})$ ]]; then
   exec "$PEER" email "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
-elif [[ $cmd =~ ^(remove|conf|enable|disable)\ ($N)$ ]]; then exec "$PEER" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+elif [[ $cmd =~ ^(remove|conf|enable|disable|activated)\ ($N)$ ]]; then exec "$PEER" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
 elif [[ $cmd =~ ^qr\ ($N)$ ]]; then exec "$PEER" qr "${BASH_REMATCH[1]}" svg
 elif [[ $cmd =~ ^profile-set\ ($P)\ ($R)\ ($D)\ v6=(on|off)\ allow=($A)\ ?($T)$ ]]; then
   exec "$PEER" profile-set "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" \

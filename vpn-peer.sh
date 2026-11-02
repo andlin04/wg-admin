@@ -1,20 +1,26 @@
 #!/bin/bash
 # WireGuard peers on vpn1 (installed as /usr/local/sbin/vpn-peer by setup-vpn1.sh; the portal reaches it through
 # vpn-gate.sh):
-#   vpn-peer add NAME [PROFILE] [ALLOWED]   new key pair + next free 10.66.0.x; client config
+#   vpn-peer add NAME [PROFILE] [ALLOWED] [DAYS]   new key pair + next free 10.66.0.x; client config
 #                                 /etc/wireguard/clients/NAME.conf. PROFILE from /etc/wireguard/profiles (default
-#                                 split). ALLOWED overrides the client routes (LAN tests only).
+#                                 split). ALLOWED overrides the client routes (LAN tests only; "-" = none). DAYS:
+#                                 activation deadline 1-30 days (default ACTIVATE_DAYS).
 #   vpn-peer profile NAME PROFILE  switch a peer's profile (re-import only if routes/DNS/IPv6 differ)
 #   vpn-peer conf NAME            the client config (holds the client's private key)
 #   vpn-peer qr NAME [svg]        QR code of the client config (terminal, or SVG)
 #   vpn-peer remove NAME
 #   vpn-peer list                 name, profile, address, latest handshake
 #   vpn-peer dump                 tab-separated: name profile address handshake rx tx created tags reimport(0|1) email
-#                                 disabled(0|1) id
+#                                 disabled(0|1) id activate-by activated (epochs, 0 = none)
+#   vpn-peer activated NAME       first handshake seen (wg-admin, owner 2026-11-02): "# activated:" into the block and
+#                                 the stored client config deleted; only devices added with "# activate-by:"
 #   vpn-peer ids                  give every peer block without one a "# id:" line (install.sh): a UUID that never
 #                                 changes; wg-connlog and the audit log tag lines with it (Log tab for group admins)
-#   vpn-peer disable|enable NAME  VPN access off/on, setup kept (owner 2026-10-27): a "# disabled: 1" line in the
-#                                 block keeps the peer out of the live wg0 and out of the firewall's peer sets
+#   vpn-peer deadlines            give every peer block without one a "# activate-by:" line, now + ACTIVATE_DAYS
+#                                 (install.sh; devices added before the activation deadline existed)
+#   vpn-peer disable|enable NAME [DAYS]  VPN access off/on, setup kept (owner 2026-10-27): a "# disabled: 1" line in
+#                                 the block keeps the peer out of the live wg0 and out of the firewall's peer sets;
+#                                 enable past the activation deadline: DAYS (1-30, default ACTIVATE_DAYS) more
 #   vpn-peer sync                 load wg0.conf minus disabled peers into wg0 (wg-quick@wg0 ExecStartPost at boot)
 #   vpn-peer email NAME ADDR      set the device owner's email ("-" = none; map vpn-mail)
 #   vpn-peer tags NAME TAGS       set a peer's tags (comma-separated, "-" = none; portal filter, owner 2026-10-26)
@@ -42,7 +48,9 @@
 #                                 /etc/wg-admin; age asks for the passphrase (owner 2026-10-26). README.md: restore.
 #   vpn-peer import FILE          restore an export; the current state moves to /etc/<dir>.before-import-TIME
 # Each peer block in wg0.conf carries "# name:", "# profile:" and "# created:" lines; the client private key lives
-# only in the client config (owner 2026-10-26: kept, so the portal can hand out the package again).
+# only in the client config (owner 2026-10-26: kept, so the portal can hand out the package again; owner 2026-11-02:
+# deleted at the first handshake). Activation deadline (owner 2026-11-02): add writes "# activate-by:" (now +
+# ACTIVATE_DAYS); wg-admin switches a device off that has not connected by then; enable gives it ACTIVATE_DAYS again.
 # Profiles (owner 2026-10-26: editable from the portal): one line each in $PROFILES, name TAB routes TAB dns TAB
 # ipv6 (on|off) TAB allow ("-" or allowed destinations) TAB description. IPv6 on: the client gets fd66:66::N next to 10.66.0.N and vpn1 forwards (NAT66) to
 # the profile's IPv6 routes; off: IPv6 from the peer is dropped (an IPv6 route like ::/0 then blocks leaks). Every
@@ -86,6 +94,15 @@ OUT4=$(envval TRANSIT_IF); OUT4=${OUT4:-$LAN}
 # (e.g. 192.168.1.10/32>10.66.0.4/32/tcp/22). Empty = none: by default nothing reaches a peer from outside wg0.
 INBOUND=$(envval INBOUND)
 TUN4=10.66.0.0/24 RT_TABLE=66
+ACTIVATE_DAYS=$(envval ACTIVATE_DAYS)  # days a new device has for its first connection (vpn.env, default 3)
+[[ $ACTIVATE_DAYS =~ ^[1-9][0-9]?$ ]] || ACTIVATE_DAYS=3
+# Client config of $name missing: deleted after activation, or never there.
+no_conf() {
+  if awk -v n="# name: $name" "$MINE"'BEGIN{RS=""} mine() && /\n# activated: / {f=1} END {exit !f}' "$CONF"; then
+    echo "config deleted after activation: revoke and add the device again"
+  else echo "no client config for $name"; fi
+  exit 1
+}
 listen_port() { sed -n '1,/^\[Peer\]/{s/^ListenPort *= *//p}' "$CONF" | head -n1; }
 mark() { (umask 077; printf '%s\n' "$@" >> "$REIMPORT"); }
 unmark() {
@@ -337,7 +354,10 @@ case "$cmd" in
     need_name
     profile=${3:-split}
     field "$profile" 2 >/dev/null
-    allowed=${4:-$(field "$profile" 2)}
+    override=${4:-}; [ "$override" != "-" ] || override=""  # "-": no ALLOWED override (wg-admin passes DAYS after it)
+    allowed=${override:-$(field "$profile" 2)}
+    days=${5:-$ACTIVATE_DAYS}  # activation deadline in days, 1-30 (wg-admin, owner 2026-11-02)
+    [[ $days =~ ^[1-9][0-9]?$ ]] && (( days <= 30 )) || days=$ACTIVATE_DAYS
     grep -qx "# name: $name" "$CONF" && { echo "$name exists"; exit 1; }
     ENDPOINT=$(envval ENDPOINT) KEEPALIVE=$(envval KEEPALIVE)
     [ -n "$ENDPOINT" ] || { echo "no ENDPOINT in /etc/wireguard/vpn.env"; exit 1; }
@@ -348,8 +368,10 @@ case "$cmd" in
     done
     [ -n "$ip" ] || { echo "no free address"; exit 1; }
     key=$(wg genkey); pub=$(wg pubkey <<<"$key"); psk=$(wg genpsk)
-    printf '\n[Peer]\n# name: %s\n# id: %s\n# profile: %s\n# created: %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32,fd66:66::%s/128\n' \
-      "$name" "$(cat /proc/sys/kernel/random/uuid)" "$profile" "$(date +%s)" "$pub" "$psk" "$ip" "${ip##*.}" >> "$CONF"
+    now=$(date +%s)
+    printf '\n[Peer]\n# name: %s\n# id: %s\n# profile: %s\n# created: %s\n# activate-by: %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32,fd66:66::%s/128\n' \
+      "$name" "$(cat /proc/sys/kernel/random/uuid)" "$profile" "$now" "$((now + days * 86400))" "$pub" "$psk" \
+      "$ip" "${ip##*.}" >> "$CONF"
     (umask 077; cat > "$DIR/$name.conf" <<EOF
 [Interface]
 PrivateKey = $key
@@ -365,7 +387,7 @@ EOF
 )
     # Routes + DNS from the profile; a LAN-test ALLOWED override keeps its routes.
     apply "$name" "$profile"
-    [ -z "${4:-}" ] || sed -i "s|^AllowedIPs = .*|AllowedIPs = $allowed|" "$DIR/$name.conf"
+    [ -z "$override" ] || sed -i "s|^AllowedIPs = .*|AllowedIPs = $allowed|" "$DIR/$name.conf"
     reload; firewall
     logger -t vpn-peer "added $name $ip profile $profile"
     echo "added $name $ip $profile"
@@ -381,12 +403,15 @@ EOF
     chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"
     # Re-import only when the client config changed: profiles with the same routes, DNS and IPv6 (e.g. full and a
     # restricted full-tunnel profile) differ only in vpn1's firewall (map vpn-least-privilege, 2026-11-01).
-    before=$(cat "$DIR/$name.conf")
-    apply "$name" "$profile"
-    [ "$before" = "$(cat "$DIR/$name.conf")" ] || mark "$name"
+    note=""
+    if [ -f "$DIR/$name.conf" ]; then
+      before=$(cat "$DIR/$name.conf")
+      apply "$name" "$profile"
+      [ "$before" = "$(cat "$DIR/$name.conf")" ] || mark "$name"
+    else note=" (activated: the device keeps its client routes and DNS)"; fi
     firewall
     logger -t vpn-peer "profile $name $profile"
-    echo "profile $name $profile"
+    echo "profile $name $profile$note"
     ;;
   tags)
     need_peer
@@ -413,8 +438,14 @@ EOF
     ;;
   disable | enable)
     need_peer
-    awk -v n="# name: $name" -v on="$cmd" "$MINE"'BEGIN{RS=""; ORS="\n\n"}
-      mine() { gsub(/\n# disabled: [^\n]*/, ""); if (on == "disable") sub(n, n "\n# disabled: 1") } {print}' \
+    # enable of a device past its activation deadline: DAYS ($3, 1-30, wg-admin) or ACTIVATE_DAYS from now again
+    days=${3:-$ACTIVATE_DAYS}
+    [[ $days =~ ^[1-9][0-9]?$ ]] && (( days <= 30 )) || days=$ACTIVATE_DAYS
+    awk -v n="# name: $name" -v on="$cmd" -v now="$(date +%s)" -v days="$days" "$MINE"'BEGIN{RS=""; ORS="\n\n"}
+      mine() { gsub(/\n# disabled: [^\n]*/, ""); if (on == "disable") sub(n, n "\n# disabled: 1")
+               if (on == "enable" && !/\n# activated: / && match($0, /\n# activate-by: [0-9]+/) &&
+                   substr($0, RSTART + 16, RLENGTH - 16) + 0 < now + 0)
+                 sub(/\n# activate-by: [0-9]+/, "\n# activate-by: " (now + days * 86400)) } {print}' \
       "$CONF" > "$CONF.new"
     chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"
     reload; firewall
@@ -434,15 +465,45 @@ EOF
       chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"; logger -t vpn-peer "ids added"; echo "ids added"
     fi
     ;;
+  deadlines)
+    # Peers added before the activation deadline (owner 2026-11-02) get one: now + ACTIVATE_DAYS (install.sh).
+    # After "# created:", else after the last of "# name:" / "# id:". Comment lines only, like ids.
+    awk -v by="$(( $(date +%s) + ACTIVATE_DAYS * 86400 ))" 'BEGIN{RS=""; ORS="\n\n"}
+      /# name: / && !/\n# activate-by: / {
+        line = "\n# activate-by: " by
+        if (/\n# created: [^\n]*/) sub(/\n# created: [^\n]*/, "&" line)
+        else if (/\n# id: [^\n]*/) sub(/\n# id: [^\n]*/, "&" line)
+        else sub(/# name: [^\n]*/, "&" line) } {print}' \
+      "$CONF" > "$CONF.new"
+    if cmp -s "$CONF" "$CONF.new"; then rm "$CONF.new"; else
+      chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"; logger -t vpn-peer "deadlines added"; echo "deadlines added"
+    fi
+    ;;
   conf)
     need_peer
+    [ -f "$DIR/$name.conf" ] || no_conf
     cat "$DIR/$name.conf"
     unmark "$name"
     ;;
   qr)
     need_peer
+    [ -f "$DIR/$name.conf" ] || no_conf
     if [ "${3:-}" = svg ]; then qrencode -t SVG -o - < "$DIR/$name.conf"; else qrencode -t ansiutf8 < "$DIR/$name.conf"; fi
     unmark "$name"
+    ;;
+  activated)
+    # The client config is the only copy of the device's private key on this host (export files are the owner's).
+    need_peer
+    awk -v n="# name: $name" "$MINE"'BEGIN{RS=""} mine() && /\n# activate-by: / {f=1} END {exit !f}' "$CONF" ||
+      { echo "$name has no activation deadline (added before 2026-11-02): config kept"; exit 1; }
+    awk -v n="# name: $name" -v t="$(date +%s)" "$MINE"'BEGIN{RS=""; ORS="\n\n"}
+      mine() && !/\n# activated: / { sub(/\n# activate-by: [^\n]*/, "&\n# activated: " t) } {print}' \
+      "$CONF" > "$CONF.new"
+    chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"
+    rm -f "$DIR/$name.conf" "$DIR/$name.conf.new"
+    unmark "$name"
+    logger -t vpn-peer "activated $name: client config deleted"
+    echo "activated $name: stored client config deleted"
     ;;
   remove)
     need_peer
@@ -459,14 +520,16 @@ EOF
     declare -A hs rx tx
     while IFS=$'\t' read -r pub _ _ _ t r x _; do hs[$pub]=$t; rx[$pub]=$r; tx[$pub]=$x; done \
       < <(wg show wg0 dump | tail -n +2)
-    awk '/^\[Peer\]/ {n=""; p="split"; c=0; g="-"; m="-"; x=0; u="-"} /^# name:/ {n=$3} /^# profile:/ {p=$3} /^# created:/ {c=$3}
-         /^# tags:/ {g=$3} /^# email:/ {m=$3} /^# disabled: 1$/ {x=1} /^# id:/ {u=$3} /^PublicKey/ {k=$3}
-         /^AllowedIPs/ && n {split($3, a, ","); print n, p, c, k, a[1], g, m, x, u; n=""}' "$CONF" |
-      while read -r n p c k a g m x u; do
+    awk '/^\[Peer\]/ {n=""; p="split"; c=0; g="-"; m="-"; x=0; u="-"; b=0; v=0} /^# name:/ {n=$3} /^# profile:/ {p=$3}
+         /^# created:/ {c=$3} /^# tags:/ {g=$3} /^# email:/ {m=$3} /^# disabled: 1$/ {x=1} /^# id:/ {u=$3}
+         /^# activate-by:/ {b=$3} /^# activated:/ {v=$3} /^PublicKey/ {k=$3}
+         /^AllowedIPs/ && n {split($3, a, ","); print n, p, c, k, a[1], g, m, x, u, b, v; n=""}' "$CONF" |
+      while read -r n p c k a g m x u b v; do
         t=${hs[$k]:-0} ri=0
         grep -Fqx "$n" "$REIMPORT" 2>/dev/null && ri=1
         if [ "$cmd" = dump ]; then
-          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$p" "${a%/32}" "$t" "${rx[$k]:-0}" "${tx[$k]:-0}" "$c" "$g" "$ri" "$m" "$x" "$u"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$p" "${a%/32}" "$t" "${rx[$k]:-0}" \
+            "${tx[$k]:-0}" "$c" "$g" "$ri" "$m" "$x" "$u" "$b" "$v"
         else
           if [ "$t" = 0 ]; then seen=never; else seen=$(date -d "@$t" '+%F %T'); fi
           echo "$n $p $a $seen ${g/#-/}"
@@ -508,6 +571,7 @@ EOF
     chmod 600 "$PROFILES.new"; mv "$PROFILES.new" "$PROFILES"
     count=0
     for p in $(peers_of "$name"); do
+      [ -f "$DIR/$p.conf" ] || continue  # activated: no stored config
       apply "$p" "$name"
       [ "$old" = "$(printf '%s\t%s\t%s' "$routes" "$dns" "$v6")" ] || mark "$p"
       count=$((count + 1))
@@ -783,5 +847,5 @@ EOF
     echo "imported $in: $(grep -c '^# name: ' "$CONF" || true) peers; old state:${moved:- none} -> .before-import-$ts"
     echo "next: bash setup-vpn1.sh (owners, firewall, services), then systemctl restart wg-quick@wg0 wg-admin"
     ;;
-  *) echo "usage: vpn-peer add|profile|tags|conf|qr|remove|list|dump|profiles|profile-set|profile-del|health|server|server-set|ruleset|log|logging|logging-set|firewall|check|export|import [NAME] ..."; exit 2 ;;
+  *) echo "usage: vpn-peer add|profile|tags|conf|qr|activated|ids|deadlines|enable|disable|remove|list|dump|profiles|profile-set|profile-del|health|server|server-set|ruleset|log|logging|logging-set|firewall|check|export|import [NAME] ..."; exit 2 ;;
 esac

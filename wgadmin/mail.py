@@ -9,6 +9,7 @@ import re
 import smtplib
 import ssl
 from collections.abc import Callable
+from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 from pathlib import Path
@@ -18,7 +19,7 @@ from .vpn import EMAIL, VpnError
 
 HOST = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}[A-Za-z0-9])?)*$")
 SECURITY = ("none", "starttls", "ssl")
-DEFAULTS: dict[str, Any] = {"from_addr": "", "host": "", "port": 25, "security": "none", "user": ""}
+DEFAULTS: dict[str, Any] = {"from_addr": "", "host": "", "port": 25, "security": "none", "user": "", "admin": ""}
 KINDS = {
     "changed": ("Your VPN configuration for {name} has changed",
                 "The VPN settings for your device {name} have changed. The device must import its new configuration"
@@ -30,11 +31,35 @@ BODY = """Hello,
 
 {lines}
 
+Each configuration is for one device only: using it on more than one device gets it switched off automatically.
+
 Ask your administrator for the new configuration (QR code or file). This mail holds no keys or passwords.
 
 Kind regards,
 VPN administration
 """
+# Devices added with an activation deadline (owner 2026-11-02)
+DEADLINE = ("{name} must be activated (connected once) by {date}{within}, or it is switched off. The"
+            " stored copy of its configuration is deleted after activation: keep the QR code or file safe until then.")
+ALERT = """Hello,
+
+{text}
+
+This mail holds no keys or passwords.
+
+Kind regards,
+VPN administration
+"""
+
+
+def when(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch).strftime("%Y-%m-%d %H:%M")
+
+
+def days(p: dict[str, Any]) -> int:
+    """The device's activation window in days as set when it was added; 0 = unknown (deadline backfilled later)."""
+    d = round((p["activate_by"] - p["created"]) / 86400) if p.get("created") else 0
+    return d if 1 <= d <= 30 else 0
 
 Sender = Callable[[dict[str, Any], str, EmailMessage], None]
 
@@ -55,7 +80,10 @@ def _write(path: Path, text: str) -> None:
 
 def check(s: dict[str, Any]) -> dict[str, Any]:
     out = {"from_addr": str(s.get("from_addr", "")).strip(), "host": str(s.get("host", "")).strip().lower(),
-           "port": s.get("port"), "security": s.get("security"), "user": str(s.get("user", "")).strip()}
+           "port": s.get("port"), "security": s.get("security"), "user": str(s.get("user", "")).strip(),
+           "admin": str(s.get("admin", "")).strip()}  # admin copy address (owner 2026-11-02), "" = none
+    if out["admin"] and (len(out["admin"]) > 254 or not EMAIL.match(out["admin"])):
+        raise VpnError("admin address: a plain address like admin@example.org, or empty")
     if not EMAIL.match(out["from_addr"]):
         raise VpnError("from address: a plain address like vpn@example.org")
     if not HOST.match(out["host"]):
@@ -98,10 +126,28 @@ def message(s: dict[str, Any], to: str, subject: str, body: str) -> EmailMessage
     return msg
 
 
-def notice(s: dict[str, Any], to: str, names: list[str], kind: str) -> EmailMessage:
+def notice(s: dict[str, Any], to: str, names: list[str], kind: str,
+           peers: dict[str, dict[str, Any]] | None = None) -> EmailMessage:
+    """peers: name -> vpn.parse_dump dict; a device not yet activated gets its deadline line."""
     subject, line = KINDS[kind]
     subj = subject.format(name=names[0]) if len(names) == 1 else subject.format(name=f"{len(names)} devices")
-    return message(s, to, subj, BODY.format(lines="\n\n".join(line.format(name=n) for n in names)))
+    lines = []
+    for n in names:
+        lines.append(line.format(name=n))
+        p = (peers or {}).get(n)
+        if p and p["activate_by"] and not p["activated"]:
+            d = days(p)
+            lines.append(DEADLINE.format(name=n, date=when(p["activate_by"]),
+                                         within=f", within {d} days of being set up" if d else ""))
+    msg = message(s, to, subj, BODY.format(lines="\n\n".join(lines)))
+    if s.get("admin") and s["admin"] != to:  # the admins get a copy (owner 2026-11-02)
+        msg["Bcc"] = s["admin"]
+    return msg
+
+
+def alert(s: dict[str, Any], to: str, subject: str, text: str) -> EmailMessage:
+    """Automatic notices (activation deadline, copied key) to the device owner and the admins."""
+    return message(s, to, subject, ALERT.format(text=text))
 
 
 def smtp_send(s: dict[str, Any], pw: str, msg: EmailMessage) -> None:

@@ -18,13 +18,15 @@
 .vpncoll .vpnitem:not(:last-child) tr:last-child td { border-bottom: 1px solid var(--border); }
 .vpncoll .vpnitem:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 .vpncoll td { vertical-align: middle; }
-.vpncoll td.vpnchevtd { width: 1%; text-align: right; }
+/* top, not middle: the opened row grows (dropdowns), and the arrow must stay where it was clicked */
+.vpncoll td.vpnchevtd { width: 1%; text-align: right; vertical-align: top; }
 .vpnsub .userrow-actions { margin-top: var(--s2); }
 .vpnopenbar { display: flex; justify-content: flex-end; margin-bottom: var(--s2); }
 /* Server settings parts (ui.js foldSections): collapsed = heading + summary line, arrow at the right */
-.vpnsec > .pagehead { align-items: center; }
+/* The arrow keeps its spot when the part opens (owner 2026-11-02): pinned top right, not in the head's flex flow */
+.vpnsec > .pagehead { position: relative; align-items: center; padding-right: 32px; }
 .vpnsec > .pagehead > div:first-child { margin-right: auto; }
-.vpnsec > .pagehead > .vpnrowhead { margin-left: var(--s2); }
+.vpnsec > .pagehead > .vpnrowhead { position: absolute; top: 0; right: 0; }
 .vpnsec .vpnsecsum { margin-top: 2px; }
 .vpnsec.open .vpnsecsum, .vpnsec:not(.open) .vpnsecbody,
 .vpnsec:not(.open) > .pagehead p, .vpnsec:not(.open) > .pagehead > .userrow-actions { display: none; }

@@ -15,6 +15,7 @@ import subprocess
 import time
 import zipfile
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,8 @@ Phone (iOS / Android): install the WireGuard app, tap + > Scan from QR code (the
 file", pick {name}.conf, Activate. Linux: copy {name}.conf to /etc/wireguard/ and run `wg-quick up {name}`.
 
 {name}.conf holds this device's private key: keep it on this device only. Lost device: ask an admin to revoke it.
+One device only: a config used from several places at once is revoked automatically. A new device must connect
+before its deadline or it is switched off; after its first connection the server deletes its stored copy.
 """
 
 
@@ -159,22 +162,35 @@ def call(cfg: Config, request: str, runner: Runner | None = None) -> str:
 
 
 def parse_dump(text: str) -> list[dict[str, Any]]:
-    """`vpn-peer dump` (name profile address handshake rx tx created [tags [reimport]], tab-separated) -> peer
-    dicts. reimport: the client config changed since it was last fetched (the device must import it again)."""
+    """`vpn-peer dump` (name profile address handshake rx tx created [tags [reimport [email [disabled [id
+    [activate-by activated]]]]]], tab-separated) -> peer dicts. reimport: the client config changed since it was last
+    fetched (the device must import it again). activate_by/activated: epochs, 0 = none (devices added from
+    2026-11-02 on carry a deadline)."""
     peers = []
     for line in text.splitlines():
         f = line.split("\t")
-        if len(f) not in (7, 8, 9, 10, 11, 12) or not NAME.match(f[0]):
+        if len(f) not in (7, 8, 9, 10, 11, 12, 14) or not NAME.match(f[0]):
             continue
-        num = [int(x) if x.isdigit() else 0 for x in f[3:7]]
+        num = [int(x) if x.isdigit() else 0 for x in f[3:7] + f[12:14]]
         tags = [t for t in f[7].split(",") if TAG.match(t)] if len(f) >= 8 else []
         peers.append({"name": f[0], "profile": f[1], "address": f[2], "handshake": num[0] or None,
                       "rx": num[1], "tx": num[2], "created": num[3] or None, "tags": tags,
                       "reimport": len(f) >= 9 and f[8] == "1",
                       "email": f[9] if len(f) >= 10 and EMAIL.match(f[9]) else "",
                       "enabled": not (len(f) >= 11 and f[10] == "1"),
-                      "id": f[11] if len(f) == 12 and UUID.match(f[11]) else ""})
+                      "id": f[11] if len(f) >= 12 and UUID.match(f[11]) else "",
+                      "activate_by": num[4] if len(num) > 4 else 0, "activated": num[5] if len(num) > 4 else 0})
     return peers
+
+
+def activation_expired(p: dict[str, Any], now: float) -> bool:
+    """Added with a deadline, never connected, deadline passed."""
+    return bool(p["activate_by"]) and not p["activated"] and not p["handshake"] and now > p["activate_by"]
+
+
+def activate(cfg: Config, name: str, runner: Runner | None = None) -> str:
+    """First handshake seen: vpn-peer marks the device activated and deletes its stored client config."""
+    return call(cfg, f"activated {check_name(name)}", runner).strip()
 
 
 def parse_profiles(text: str) -> list[dict[str, Any]]:
@@ -209,8 +225,17 @@ def peers(cfg: Config, runner: Runner | None = None) -> list[dict[str, Any]]:
     return parse_dump(call(cfg, "dump", runner))
 
 
-def add(cfg: Config, name: str, profile: str, runner: Runner | None = None) -> str:
-    return call(cfg, f"add {check_name(name)} {check_profile(profile)}", runner).strip()
+def check_days(days: int) -> int:
+    """Activation deadline in days (owner 2026-11-02): 1-30."""
+    if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
+        raise VpnError("days: 1-30")
+    return days
+
+
+def add(cfg: Config, name: str, profile: str, runner: Runner | None = None, days: int | None = None) -> str:
+    """days: activation deadline (None = vpn-peer's ACTIVATE_DAYS); "-" = no ALLOWED override (LAN tests only)."""
+    extra = "" if days is None else f" - {check_days(days)}"
+    return call(cfg, f"add {check_name(name)} {check_profile(profile)}{extra}", runner).strip()
 
 
 def set_profile(cfg: Config, name: str, profile: str, runner: Runner | None = None) -> str:
@@ -233,9 +258,11 @@ def set_email(cfg: Config, name: str, email: str, runner: Runner | None = None) 
     return call(cfg, f"email {check_name(name)} {check_email(email) or '-'}", runner).strip()
 
 
-def set_enabled(cfg: Config, name: str, enabled: bool, runner: Runner | None = None) -> str:
-    """Disable: the peer leaves the live WireGuard config and the firewall; keys, profile, tags and email stay."""
-    return call(cfg, f"{'enable' if enabled else 'disable'} {check_name(name)}", runner).strip()
+def set_enabled(cfg: Config, name: str, enabled: bool, runner: Runner | None = None, days: int | None = None) -> str:
+    """Disable: the peer leaves the live WireGuard config and the firewall; keys, profile, tags and email stay.
+    days (enable only): a passed activation deadline moves to now + days (None = vpn-peer's ACTIVATE_DAYS)."""
+    extra = f" {check_days(days)}" if enabled and days is not None else ""
+    return call(cfg, f"{'enable' if enabled else 'disable'} {check_name(name)}{extra}", runner).strip()
 
 
 BULK_MAX = 50
@@ -429,6 +456,43 @@ def parse_log(text: str) -> list[dict[str, Any]]:
 
 def log(cfg: Config, hours: int, runner: Runner | None = None) -> list[dict[str, Any]]:
     return parse_log(call(cfg, f"log {int(hours)}", runner))
+
+
+# Copied key (owner 2026-11-02): one key used from several places at once makes WireGuard's endpoint flip between
+# their addresses. CLONE_CHANGES endpoint IP changes (ports ignored) within CLONE_WINDOW_S, back to an earlier IP.
+CLONE_WINDOW_S = 600
+CLONE_CHANGES = 3
+
+
+def clones(rows: list[dict[str, Any]], since: dict[str, float] | None = None
+           ) -> dict[tuple[str, str], list[tuple[str, str]]]:
+    """parse_log rows -> {(peer, id): [(time, ip), ...]} of the devices whose wg-conn lines show the pattern; the
+    list = the endpoint IPs of the matching stretch, oldest first. since: {peer: epoch}: only that peer's rows newer
+    than it count (a device switched back on after a copied-key switch-off starts afresh)."""
+    since = since or {}
+    seqs: dict[tuple[str, str], list[tuple[float, str, str]]] = {}
+    for r in reversed(rows):  # oldest first
+        e = re.search(r"\bendpoint=(\S+)", r["text"]) if r["kind"] == "conn" and r["peer"] else None
+        if not e or e.group(1) == "(none)":
+            continue
+        try:
+            t = datetime.fromisoformat(r["time"]).timestamp()
+        except ValueError:
+            continue
+        if t <= since.get(r["peer"], 0):
+            continue
+        ip, s = e.group(1).rpartition(":")[0], seqs.setdefault((r["peer"], r["id"]), [])
+        if ip and (not s or s[-1][2] != ip):
+            s.append((t, r["time"], ip))
+    out = {}
+    for key, s in seqs.items():
+        for k in range(CLONE_CHANGES, len(s)):
+            run = s[k - CLONE_CHANGES:k + 1]  # CLONE_CHANGES changes: at run[1] .. run[-1]
+            ips = [x[2] for x in run]
+            if run[-1][0] - run[1][0] <= CLONE_WINDOW_S and len(set(ips)) < len(ips):
+                out[key] = [(x[1], x[2]) for x in run]
+                break
+    return out
 
 
 SYSLOG_HOST = re.compile(r"^(-|[A-Za-z0-9.-]{1,253}|[0-9a-f:]{2,39})$")  # vpn-gate.sh allows the same

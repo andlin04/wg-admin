@@ -182,6 +182,8 @@ const MARKUP = `
     <input class="input" id="vpntags" maxlength="180" autocomplete="off" placeholder="family, phones" autocapitalize="none" spellcheck="false">
     <label for="vpnemail">Owner email (optional: for notices)</label>
     <input class="input" id="vpnemail" type="email" maxlength="254" autocomplete="off" placeholder="anna@example.org" autocapitalize="none" spellcheck="false">
+    <label for="vpndays">Days to activate (connect once or it is switched off)</label>
+    <input class="input" id="vpndays" type="number" min="1" max="30" required>
     <div><button class="btn primary sm" type="submit">Create</button>
       <button class="btn ghost sm" type="button" id="vpncancel">Cancel</button> <span id="vpnmsg" class="meta" role="status"></span></div>
   </form>
@@ -320,6 +322,9 @@ const MARKUP = `
     <h2>Edit mail settings</h2>
     <label for="vpnmfrom">From address</label>
     <input class="input" id="vpnmfrom" type="email" maxlength="254" autocomplete="off" placeholder="vpn@example.org" autocapitalize="none" spellcheck="false" required>
+    <label for="vpnmadmin">Admin address (optional)</label>
+    <input class="input" id="vpnmadmin" type="email" maxlength="254" autocomplete="off" placeholder="admin@example.org" autocapitalize="none" spellcheck="false" aria-describedby="vpnmadminhint">
+    <p class="hint" id="vpnmadminhint">gets a copy of every mail and the deadline/copied-key alerts; empty = none</p>
     <label for="vpnmhost">SMTP relay host</label>
     <input class="input" id="vpnmhost" maxlength="253" autocomplete="off" placeholder="smtp.example.org" autocapitalize="none" spellcheck="false" required>
     <label for="vpnmport">Port</label>
@@ -354,6 +359,14 @@ const MARKUP = `
       <button class="btn ghost sm" type="button" id="vpnlgcancel">Cancel</button> <span id="vpnlgmsg" class="meta" role="status"></span></div>
   </form>
   <div id="vpnlgbox"><div class="nodata">Loading…</div></div>
+  <div class="pagehead vpnphead"><div><h2>Activation deadline</h2><p>A new device must connect within this many days or
+    it is switched off. The add form starts with this value.</p></div></div>
+  <form id="vpndlform" class="factform">
+    <label for="vpndldays">Days to activate a new device (1-30)</label>
+    <input class="input" id="vpndldays" type="number" min="1" max="30" required>
+    <label class="hint"><input type="checkbox" id="vpndlgroup"> group admins may change the deadline when adding a device</label>
+    <div><button class="btn primary sm" type="submit">Save</button> <span id="vpndlmsg" class="meta" role="status"></span></div>
+  </form>
   </div>
   </div>
   <!-- Info box (owner 2026-10-27): what this is + short how-tos, right of everything -->
@@ -368,6 +381,7 @@ const MARKUP = `
       <li><strong>3. Devices:</strong> Add a device with a profile and schedule, then scan the QR in the WireGuard app (or send the .zip).</li>
       <li><strong>Slider:</strong> access on/off; the setup stays.</li>
       <li><strong>re-import:</strong> config changed: show the QR again.</li>
+      <li><strong>activate by:</strong> a new device must connect within its deadline (3 days by default) or it is switched off; after the first connection its config is deleted (no QR or .conf). A key used from several places at once is switched off.</li>
       <li><strong>Revoke:</strong> removes the device for good.</li>
       <li><strong>Server settings:</strong> endpoint, port, mail, and what the firewall lets each profile reach.</li>
     </ul>
@@ -413,9 +427,12 @@ async function act(p, what, to) {
       if (typed === null) return;
       await api(peerPath(p.name) + "/email", { method: "POST", body: JSON.stringify({ email: typed.trim() }) });
     } else {
-      if (!confirm(`Switch ${p.name} to profile ${to}? The device must import the new config afterwards.`)) { loadPeers(); return; }
+      const after = clientSide(p.profile) === clientSide(to) ? "No re-import needed."
+        : p.activated ? `Activated device (its config is no longer stored, so it can't be updated; Revoke and Add it again): ${p.name}.`
+        : "The device must import the new config afterwards.";
+      if (!confirm(`Switch ${p.name} to profile ${to}? ${after}`)) { loadPeers(); return; }
       await api(peerPath(p.name) + "/profile", { method: "POST", body: JSON.stringify({ profile: to }) });
-      showQr(p.name, `Profile now ${to}: scan again or import the new package on the device.`);
+      if (!p.activated) showQr(p.name, `Profile now ${to}: scan again or import the new package on the device.`);
     }
     loadPeers();
   } catch (x) { alert(x.message); loadPeers(); }
@@ -565,7 +582,7 @@ function openAllBtn(kind, names, rerender) {
 }
 function openAllBar(kind, names, rerender) { const d = el("div", "vpnopenbar"); d.appendChild(openAllBtn(kind, names, rerender)); return d; }
 
-// Server settings: each part (Server, Network, Firewall, Mail, Logging) folds to its heading and a summary line.
+// Server settings: each part (Server, Network, Firewall, Mail, Logging, Activation deadline) folds to its heading and a summary line.
 // mount() wraps each heading and what follows it up to the next heading in a section.
 function foldSections() {
   const view = $("vpnvserver");
@@ -783,6 +800,7 @@ async function loadPeers() {
   fillAddForm();
   renderProfiles();
   renderPeers();
+  if (isAdmin()) renderDeadline();
   if (isAdmin()) loadFirewall();  // after the state: names and profiles for the firewall table; also follows every change
 }
 function renderPeers() {
@@ -894,6 +912,14 @@ function renderPeers() {
       ri.title = "Its config changed: show the QR or download the package for the device";
       seen.append(" ", ri);
     }
+    // activation deadline (owner 2026-11-02): devices added since then must connect once in time
+    if (p.activate_by && !p.activated) {
+      const late = !p.handshake && now > p.activate_by;
+      const ab = el("span", "pill " + (late ? "warn" : "nodot"), late ? "not activated" : "activate by " + new Date(p.activate_by * 1000).toLocaleDateString());
+      ab.title = late ? `Not connected by ${whenAt(p.activate_by)}: switched off. Turning it on gives it the same time again.`
+        : `Must connect once by ${whenAt(p.activate_by)} or it is switched off; its stored config is deleted after the first connection`;
+      seen.append(" ", ab);
+    }
     const ex = chevCell("dev", p.name, renderPeers);
     tr.append(tick, who, addr, prof, on, seen, ex);
     tb.appendChild(tr);
@@ -936,14 +962,17 @@ function renderPeers() {
       const more = el("tr", "vpnsub"), mc = el("td"), row = el("div", "userrow-actions");
       mc.colSpan = 6;
       more.append(el("td"), mc);
-      mc.appendChild(el("div", "meta", `in / out ${bytes(p.tx)} / ${bytes(p.rx)} · added ${whenAt(p.created)}`));
+      mc.appendChild(el("div", "meta", `in / out ${bytes(p.tx)} / ${bytes(p.rx)} · added ${whenAt(p.created)}` +
+        (p.activated ? ` · activated ${whenAt(p.activated)}: config deleted, no QR or .conf (revoke and add again for a new one)` : "")));
       const btn = (label, fn, cls) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; row.appendChild(b); };
-      btn("QR", () => showQr(p.name));
-      const conf = el("a", "btn sm", ".conf");
-      conf.href = BASE + peerPath(p.name) + "/conf";
-      row.appendChild(conf);
+      if (!p.activated) {
+        btn("QR", () => showQr(p.name));
+        const conf = el("a", "btn sm", ".conf");
+        conf.href = BASE + peerPath(p.name) + "/conf";
+        row.appendChild(conf);
+      }
       btn("Owner", () => act(p, "email"));
-      if (p.email) btn("Notify", () => notify([p.name]));
+      if (p.email && !p.activated) btn("Notify", () => notify([p.name]));
       btn("Log", () => openLog(p.name));
       btn("Revoke", () => act(p, "remove"), "danger");
       mc.appendChild(row);
@@ -1000,6 +1029,10 @@ const reimportNames = (names, to) => names.filter((n) => {
   const p = (LAST?.peers || []).find((x) => x.name === n);
   return !p || clientSide(p.profile) !== clientSide(to);
 });
+// Activated devices have no stored config (deleted after the first connection): a re-import is impossible, they
+// need Revoke + Add again. -> the given names whose peer is activated.
+const activatedNames = (names) => names.filter((n) => (LAST?.peers || []).some((x) => x.name === n && x.activated));
+const ACT_NOTE = "Activated devices (their config is no longer stored, so it can't be updated; Revoke and Add them again)";
 function bulkValues(setting) {
   if (setting === "profile") return PROFILES.map((p) => [p.name, p.name]);
   if (setting === "group") return [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((g) => [g.name, g.name])];
@@ -1015,8 +1048,8 @@ function bulkCount() {
   btn.disabled = !PICKED.size || !n;
   const ri = $("vpnbri");
   if (ri) {
-    const k = reimportNames([...PICKED], BULK.val.profile).length;
-    ri.textContent = PICKED.size ? `re-import ${k} of ${PICKED.size}` : "may need re-import";
+    const need = reimportNames([...PICKED], BULK.val.profile), k = need.length, a = activatedNames(need).length;
+    ri.textContent = PICKED.size ? `re-import ${k - a} of ${PICKED.size}` + (a ? `, revoke + add ${a}` : "") : "may need re-import";
     ri.className = "pill " + (PICKED.size && !k ? "ok" : "warn");
   }
 }
@@ -1058,16 +1091,18 @@ function renderBulk() {
   foot.append(apply, " ", clear, " ", close);
   box.replaceChildren(el("h2", "", "Bulk edit the selected devices"),
     el("p", "hint", "Tick the settings to change and set their values; the rest stay as they are. All of them go to every ticked device in one go (Enabled last)."),
-    rows, el("p", "hint", "* May need a re-imported profile on the client: only devices whose routes, DNS or IPv6 change import their config again (QR or .conf); the device list marks them."), foot);
+    rows, el("p", "hint", "* May need a re-imported profile on the client: only devices whose routes, DNS or IPv6 change import their config again (QR or .conf); the device list marks them. Activated devices' config is no longer stored, so it can't be updated: they need Revoke and Add again."), foot);
   bulkCount();
 }
 async function applyBulk() {
   const names = [...PICKED], changes = bulkChanges();
   const label = (k) => BULK_SETTINGS.find(([x]) => x === k)[1];
   const off = changes.some((c) => c.setting === "enabled" && c.value === "off");
-  const prof = changes.find((c) => c.setting === "profile"), ri = prof ? reimportNames(names, prof.value) : [];
+  const prof = changes.find((c) => c.setting === "profile"), need = prof ? reimportNames(names, prof.value) : [];
+  const act = activatedNames(need), ri = need.filter((n) => !act.includes(n));
   const cuts = (off ? "\nThey lose VPN access at once." : "") +
-    (ri.length ? `\nMust import the new config afterwards (re-import): ${ri.join(", ")}.` : prof ? "\nNo re-import needed." : "");
+    (ri.length ? `\nMust import the new config afterwards (re-import): ${ri.join(", ")}.` : "") +
+    (act.length ? `\n${ACT_NOTE}: ${act.join(", ")}.` : "") + (prof && !need.length ? "\nNo re-import needed." : "");
   const what = changes.map((c) => `  ${label(c.setting)} = ${c.value || "none"}`).join("\n");
   if (!confirm(`Set on ${names.length} device(s) (${names.join(", ")}):\n${what}${cuts}`)) return;
   try {
@@ -1481,7 +1516,7 @@ async function loadFirewall() {
 let MAIL = {};
 function renderMail(m) {
   MAIL = m;
-  const rows = [["From", m.from_addr || "not set"], ["Relay", m.host ? `${m.host}:${m.port}` : "not set"],
+  const rows = [["From", m.from_addr || "not set"], ["Admin copy", m.admin || "none"], ["Relay", m.host ? `${m.host}:${m.port}` : "not set"],
                 ["Security", m.security], ["User", m.user || "none"], ["Password", m.password_set ? "stored" : "none"]];
   const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
   for (const [k, v] of rows) { const tr = el("tr"); tr.append(el("th", "", k), el("td", "mono vpnval", v)); tb.appendChild(tr); }
@@ -1499,6 +1534,7 @@ function mailForm(open) {
   $("vpnmedit").setAttribute("aria-expanded", String(open));
   if (!open) return;
   $("vpnmfrom").value = MAIL.from_addr || "";
+  $("vpnmadmin").value = MAIL.admin || "";
   $("vpnmhost").value = MAIL.host || "";
   $("vpnmport").value = MAIL.port || 25;
   $("vpnmsec").value = MAIL.security || "none";
@@ -1511,7 +1547,7 @@ function mailForm(open) {
 async function saveMail(ev) {
   ev.preventDefault();
   const pw = $("vpnmpw").value;
-  const body = { from_addr: $("vpnmfrom").value.trim(), host: $("vpnmhost").value.trim(), port: Number($("vpnmport").value),
+  const body = { from_addr: $("vpnmfrom").value.trim(), admin: $("vpnmadmin").value.trim(), host: $("vpnmhost").value.trim(), port: Number($("vpnmport").value),
                  security: $("vpnmsec").value, user: $("vpnmuser").value.trim(),
                  password: $("vpnmpwclear").checked ? "" : pw ? pw : null };
   $("vpnmmsg").textContent = "Saving…";
@@ -1553,6 +1589,22 @@ async function saveLogging(ev) {
   $("vpnlgmsg").textContent = "Saving…";
   try { renderLogging(await api("api/logging", { method: "PUT", body: JSON.stringify(body) })); loggingForm(false); }
   catch (x) { $("vpnlgmsg").textContent = x.message; }
+}
+// Activation deadline (api/deadline; current value in api/state): days a new device has to connect once, and
+// whether group admins may pick another value in the add form.
+const deadline = () => (LAST && LAST.deadline) || { days: 3, group_admins: false };
+function renderDeadline() {
+  const d = deadline();
+  $("vpndldays").value = d.days;
+  $("vpndlgroup").checked = !!d.group_admins;
+  secSum("Activation deadline", `${d.days} day${d.days === 1 ? "" : "s"}; group admins ${d.group_admins ? "may" : "may not"} change it`);
+}
+async function saveDeadline(ev) {
+  ev.preventDefault();
+  const body = { days: Number($("vpndldays").value), group_admins: $("vpndlgroup").checked };
+  $("vpndlmsg").textContent = "Saving…";
+  try { await api("api/deadline", { method: "PUT", body: JSON.stringify(body) }); $("vpndlmsg").textContent = "Saved."; loadPeers(); }
+  catch (x) { $("vpndlmsg").textContent = x.message; }
 }
 async function testMail() {
   const to = prompt("Send a test mail to:", MAIL.from_addr || "");
@@ -1626,6 +1678,9 @@ function fillAddForm() {
   fillSelect($("vpnaddsched"), [["", "no schedule"], ...SCHEDULES.filter((s) => isAdmin() || g.schedules.includes(s.name)).map((s) => [s.name, s.name])]);
   fillSelect($("vpnscgroup"), [...(isAdmin() ? [["", "no group (admins only)"]] : []), ...GROUPS.map((x) => [x.name, x.name])]);
   $("vpnprofhint").textContent = profDesc($("vpnprof").value);
+  // group admins keep the default deadline unless the admin allows a choice (the server refuses others with 403)
+  $("vpndays").readOnly = !isAdmin() && !deadline().group_admins;
+  if (!$("vpndays").value || $("vpndays").readOnly) $("vpndays").value = deadline().days;
 }
 const ticks = (box, names, picked) => box.replaceChildren(...names.map((n) => {
   const lbl = el("label"), cb = el("input");
@@ -1844,6 +1899,7 @@ export function mount(target, opts = {}) {
   $("vpnmcancel").onclick = () => mailForm(false);
   $("vpnmform").onsubmit = saveMail;
   $("vpnmtest").onclick = testMail;
+  $("vpndlform").onsubmit = saveDeadline;
   $("vpnledit").onclick = () => loggingForm($("vpnlgform").hidden);
   $("vpnlgcancel").onclick = () => loggingForm(false);
   $("vpnlgform").onsubmit = saveLogging;
@@ -1892,13 +1948,13 @@ export function mount(target, opts = {}) {
       loadPeers();
     } catch (x) { $("vpnpmsg").textContent = x.message; }
   };
-  $("vpnaddbtn").onclick = () => { showView("devices"); $("vpnform").hidden = false; $("vpnaddbtn").setAttribute("aria-expanded", "true"); $("vpnmsg").textContent = ""; $("vpnname").focus(); };
+  $("vpnaddbtn").onclick = () => { showView("devices"); $("vpnform").hidden = false; $("vpnaddbtn").setAttribute("aria-expanded", "true"); $("vpnmsg").textContent = ""; $("vpndays").value = deadline().days; $("vpnname").focus(); };
   $("vpncancel").onclick = () => { $("vpnform").hidden = true; $("vpnaddbtn").setAttribute("aria-expanded", "false"); };
   $("vpnform").onsubmit = async (e) => {
     e.preventDefault();
     const name = $("vpnname").value.trim();
     try {
-      await api("api/peers", { method: "POST", body: JSON.stringify({ name, profile: $("vpnprof").value, group: $("vpngroup").value, tags: tagList($("vpntags").value), email: $("vpnemail").value.trim() }) });
+      await api("api/peers", { method: "POST", body: JSON.stringify({ name, profile: $("vpnprof").value, group: $("vpngroup").value, tags: tagList($("vpntags").value), email: $("vpnemail").value.trim(), days: Number($("vpndays").value) }) });
       const sched = $("vpnaddsched").value;
       if (sched) await api(peerPath(name) + "/schedule", { method: "POST", body: JSON.stringify({ schedule: sched }) });
       $("vpnform").hidden = true;

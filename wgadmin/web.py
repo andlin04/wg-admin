@@ -15,6 +15,7 @@ import json
 import logging
 import socket
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -124,6 +125,13 @@ class PeerIn(BaseModel):
     tags: list[str] = Field(default_factory=list, max_length=8)
     email: str = Field("", max_length=254)
     group: str = Field("", max_length=16)  # a group admin must name one of theirs
+    days: int | None = Field(None, ge=1, le=30)  # activation deadline; None = the default (Server > Deadline)
+
+
+class DeadlineIn(BaseModel):
+    """Activation deadline of new devices (owner 2026-11-02): default days; group_admins: they may pick their own."""
+    days: int = Field(ge=access.DEADLINE_MIN, le=access.DEADLINE_MAX)
+    group_admins: bool = False
 
 
 class EmailIn(BaseModel):
@@ -141,7 +149,9 @@ class BulkIn(BaseModel):
 
 # Audit actions on one device: their journal line carries the device's id (Log tab for group admins, 2026-11-02)
 DEVICE_ACTIONS = {"add", "conf", "email", "enable", "disable", "group-set", "package", "profile", "qr", "remove",
-                  "schedule-set", "schedule-on", "schedule-off", "tags"}
+                  "schedule-set", "schedule-on", "schedule-off", "tags", "activated", "activation-expired",
+                  "key-clone-revoked", "key-clone-off"}  # key-clone-revoked: log lines before 2026-11-02 switch-off
+ACTIVATED = "config deleted after activation: revoke and add the device again"
 BULK_ORDER = ("profile", "group", "schedule", "tags", "tags-add", "tags-remove", "email", "enabled")
 
 
@@ -213,6 +223,7 @@ class MailIn(BaseModel):
     security: str = "none"
     user: str = Field("", max_length=200)
     password: str | None = Field(None, max_length=500)
+    admin: str = Field("", max_length=254)  # admins' copy of automatic and notice mails; "" = none
 
 
 class MailTestIn(BaseModel):
@@ -478,7 +489,20 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             linked = {x for v in groups.values() for x in v["profiles"]}
             profiles = [p for p in profiles if p["name"] in linked]
         return {"peers": peers, "profiles": profiles, **view, "role": w.role,
-                "groups": [{"name": g, **v} for g, v in sorted(groups.items())]}
+                "groups": [{"name": g, **v} for g, v in sorted(groups.items())],
+                "deadline": {"days": acc["deadline_days"], "group_admins": acc["group_deadline"]}}
+
+    @app.put("/api/deadline")
+    def deadline_put(request: Request, body: DeadlineIn) -> dict[str, Any]:
+        """Activation deadline of new devices and switched-on expired ones (owner 2026-11-02)."""
+        user = admin_of(request)
+        with edit_lock:
+            acc = acl()
+            acc["deadline_days"], acc["group_deadline"] = body.days, body.group_admins
+            access.save(cfg.access_file, acc)
+        out = f"{body.days} days; group admins {'may' if body.group_admins else 'may not'} set their own"
+        audit(user, "deadline-set", "", True, out, f"VPN: activation deadline set by {user}: {out}")
+        return {"days": body.days, "group_admins": body.group_admins}
 
     def health() -> dict[str, Any]:
         return vpn.health(cfg, runner, load_text=load_text)
@@ -659,6 +683,9 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             raise HTTPException(403, "pick one of your groups for the device")
         if not w.admin and body.profile not in acc["groups"][body.group]["profiles"]:
             raise HTTPException(403, f"profile {body.profile} is not linked to group {body.group}")
+        days = acc["deadline_days"] if body.days is None else body.days
+        if not w.admin and days != acc["deadline_days"] and not acc["group_deadline"]:
+            raise HTTPException(403, f"the activation deadline is {acc['deadline_days']} days (set by the admins)")
         try:
             vpn.check_tags(body.tags)
             if body.email:
@@ -666,7 +693,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         except vpn.VpnError as exc:
             raise HTTPException(422, str(exc)) from None
         try:
-            out = vpn.add(cfg, body.name, body.profile, runner)
+            out = vpn.add(cfg, body.name, body.profile, runner, days)
             if body.tags:
                 out += "; " + vpn.set_tags(cfg, body.name, body.tags, runner)
             if body.email:
@@ -680,6 +707,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                 acc["members"][body.name] = body.group
                 access.save(cfg.access_file, acc)
             out += f"; group {body.group}"
+        out += f"; activation deadline {days} days"
         audit(user, "add", body.name, True, out, f"VPN: peer {body.name} (profile {body.profile}) added by {user}",
               f":key: VPN peer {body.name} (profile {body.profile}) added by {user}")
         return {"output": out, "peer": peer(body.name)}
@@ -692,10 +720,10 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             rows = vpn.parse_bulk(body.lines, {p["name"] for p in do(vpn.profiles)}, {p["name"] for p in do(vpn.peers)})
         except vpn.VpnError as exc:
             raise HTTPException(422, str(exc)) from None
-        created, error = [], ""
+        created, error, days = [], "", acl()["deadline_days"]
         for name, prof, tags, email in rows:
             try:
-                vpn.add(cfg, name, prof, runner)
+                vpn.add(cfg, name, prof, runner, days)
                 if tags:
                     vpn.set_tags(cfg, name, tags, runner)
                 if email:
@@ -764,7 +792,12 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     def peer_enabled(request: Request, name: str, body: EnabledIn) -> dict[str, Any]:
         """VPN access on/off without touching the setup (owner 2026-10-27); takes effect at once."""
         user = scoped_peer(request, name)[0].name
-        out = do(vpn.set_enabled, name, body.enabled)
+        try:
+            out = vpn.set_enabled(cfg, name, body.enabled, runner, acl()["deadline_days"] if body.enabled else None)
+        except vpn.VpnError as exc:
+            raise HTTPException(502, str(exc)) from None
+        if body.enabled:
+            clone_clear(name)
         with sched_lock:  # scheduled device: the click holds until the schedule's next change
             data = schedule.load(cfg.schedules_file)
             entry = data["assign"].get(name)
@@ -783,19 +816,34 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         user = scoped_peer(request, name)[0].name
         if confirm.strip() != name:
             raise HTTPException(400, f'type the peer name "{name}" to confirm')
+        out = do(revoke, name)
+        audit(user, "remove", name, True, out, f"VPN: peer {name} revoked by {user}",
+              f":no_entry: VPN peer {name} revoked by {user}")
+        return {"output": out}
+
+    def revoke(c: Config, name: str, r: vpn.Runner | None) -> str:
+        """Remove the device and its schedule and group entries (do()-style: VpnError on a gate failure)."""
         device_id(name)  # cached before it is gone: the "remove" audit line keeps the device's id
-        out = do(vpn.remove, name)
+        out = vpn.remove(c, name, r)
         with sched_lock:
             data = schedule.load(cfg.schedules_file)
             if data["assign"].pop(name, None) is not None:
                 schedule.save(cfg.schedules_file, data)
         with edit_lock:
             acc = acl()
-            if acc["members"].pop(name, None) is not None:
+            gone = [acc[k].pop(name, None) is not None for k in ("members", "clones")]  # both popped
+            if any(gone):
                 access.save(cfg.access_file, acc)
-        audit(user, "remove", name, True, out, f"VPN: peer {name} revoked by {user}",
-              f":no_entry: VPN peer {name} revoked by {user}")
-        return {"output": out}
+        return out
+
+    def clone_clear(name: str) -> None:
+        """Switched on by hand after a copied-key switch-off: schedules may switch it again; the copied-key check
+        counts only log lines from now on."""
+        with edit_lock:
+            acc = acl()
+            if acc["clones"].get(name, {}).get("off"):
+                acc["clones"][name] = {**acc["clones"][name], "off": False, "at": time.time()}
+                access.save(cfg.access_file, acc)
 
     # ---------------------------------------------------------------- access schedules (map vpn-totp-schedules)
     def schedules_view(data: dict[str, Any], w: Who, acc: dict[str, Any]) -> dict[str, Any]:
@@ -828,6 +876,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             before = json.dumps(data, sort_keys=True)
             current = {p["name"]: p for p in vpn.peers(cfg, runner)}
             now, switched = now_local(), []
+            off = {n for n, c in acl()["clones"].items() if c.get("off")}  # copied key: only a manual switch-on
             for name, entry in list(data["assign"].items()):
                 s = data["schedules"].get(entry.get("schedule", ""))
                 if name not in current:
@@ -836,8 +885,9 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                 if s is None:
                     continue
                 want = schedule.target(entry, s, now)
-                if current[name]["enabled"] == want:
-                    continue
+                if current[name]["enabled"] == want or want and (
+                        vpn.activation_expired(current[name], now.timestamp()) or name in off):
+                    continue  # not activated in time / copied key: only a manual switch-on brings it back
                 verb = "on" if want else "off"
                 try:
                     out = vpn.set_enabled(cfg, name, want, runner)
@@ -853,13 +903,98 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                 schedule.save(cfg.schedules_file, data)
             return switched
 
+    def alert(p: dict[str, Any], subject: str, text: str) -> str:
+        """Mail the device owner (if set) and the admin copy address (Server > Mail, if set). -> what happened, for
+        the audit line."""
+        s = mail.view(cfg)
+        if not s["ready"]:
+            return "no mail: mail settings not set"
+        sent, failed = [], []
+        for to in dict.fromkeys(x for x in (p["email"], s.get("admin", "")) if x):
+            try:
+                send(s, mail.password(cfg), mail.alert(s, to, subject, text))
+                sent.append(to)
+            except vpn.VpnError as exc:
+                failed.append(str(exc))
+        return (f"mailed {', '.join(sent) or 'nobody'}" + ("" if s.get("admin") else "; no admin address set")
+                + (f"; failed: {'; '.join(failed)}" if failed else ""))
+
+    def activation(now: float) -> list[str]:
+        """Devices with a deadline (owner 2026-11-02): first handshake -> `activated` (stored config deleted);
+        deadline passed without one -> switched off (reversible), owner and admins mailed."""
+        done = []
+        for p in vpn.peers(cfg, runner):
+            name = p["name"]
+            if not p["activate_by"] or p["activated"]:
+                continue
+            try:
+                if p["handshake"]:
+                    out = vpn.activate(cfg, name, runner)
+                    audit("activation", "activated", name, True, out, f"VPN: {name} activated: stored config deleted")
+                    done.append(f"{name} activated")
+                elif p["enabled"] and vpn.activation_expired(p, now):
+                    out = vpn.set_enabled(cfg, name, False, runner)
+                    text = (f"The VPN configuration for device {name} was not activated (connected once) by "
+                            f"{mail.when(p['activate_by'])}, {mail.days(p)} days after it was set up, so it was "
+                            f"switched off. Ask your administrator to switch it on again (it then has {mail.days(p)} "
+                            "more days) or to set up a new device.")
+                    out += "; " + alert(p, f"VPN access for {name} switched off: not activated in time", text)
+                    line = f"VPN: {name} switched off: not activated by {mail.when(p['activate_by'])}"
+                    audit("activation", "activation-expired", name, True, out, line, f":pause_button: {line}")
+                    done.append(f"{name} off")
+            except vpn.VpnError as exc:
+                log.warning("activation check of %s failed: %s", name, exc)
+        return done
+
+    def clone_check() -> list[str]:
+        """Copied key (owner 2026-11-02): the wg-conn lines of the last hour show the endpoint flipping between IPs
+        (vpn.clones) -> the device is switched off at once (reversible; schedules leave it off) and recorded in
+        access.json clones; owner and admin copy address mailed. A manual switch-on clears it (clone_clear)."""
+        marks = acl()["clones"]
+        skip = {n for n, c in marks.items() if c.get("off")}
+        since = {n: float(c["at"]) for n, c in marks.items() if isinstance(c.get("at"), (int, float))}
+        found = {k: v for k, v in vpn.clones(vpn.log(cfg, 1, runner), since).items() if k[0] not in skip}
+        if not found:
+            return []
+        current = {p["name"]: p for p in vpn.peers(cfg, runner)}
+        done = []
+        for (name, ref), seen in found.items():
+            p = current.get(name)
+            if p is None or ref and p["id"] != ref:  # gone already, or a new device under the old name
+                continue
+            ips = ", ".join(dict.fromkeys(ip for _, ip in seen))
+            try:
+                out = vpn.set_enabled(cfg, name, False, runner) if p["enabled"] else "already off"
+            except vpn.VpnError as exc:
+                log.warning("copied-key switch-off of %s failed: %s", name, exc)
+                continue
+            with edit_lock:
+                acc = acl()
+                acc["clones"][name] = {"id": p["id"], "off": True, "at": time.time()}
+                access.save(cfg.access_file, acc)
+            text = (f"The VPN key of device {name} was used from several places at the same time: several users, "
+                    "or a copied key (potential key theft). The device was switched off automatically.\n\n"
+                    "Addresses seen:\n" + "\n".join(f"  {t}  {ip}" for t, ip in seen)
+                    + "\n\nWhat to do: ask your administrator for a new device. Each configuration is for one device"
+                    " only; do not use the old one again.")
+            out += f"; IPs {ips}; " + alert(p, f"VPN access for {name} switched off: key used from several places",
+                                            text)
+            line = f"VPN: {name} switched off: key used from several IPs at once ({ips})"
+            audit("key-check", "key-clone-off", name, True, out, line, f":pause_button: {line}")
+            done.append(f"{name} off")
+        return done
+
     def safe_tick() -> None:
-        try:
-            tick()
-        except Exception as exc:  # a gate or file error must not stop the loop; the next minute retries
-            log.warning("schedule check failed: %s: %s", type(exc).__name__, exc)
+        for what, fn in (("schedule check", tick), ("activation check", lambda: activation(now_local().timestamp())),
+                         ("copied-key check", clone_check)):
+            try:
+                fn()
+            except Exception as exc:  # a gate or file error must not stop the loop; the next minute retries
+                log.warning("%s failed: %s: %s", what, type(exc).__name__, exc)
 
     app.state.schedule_tick = tick  # tests drive it with a fake clock
+    app.state.activation = activation
+    app.state.clone_check = clone_check
 
     @app.get("/api/schedules")
     def schedules_get(request: Request) -> dict[str, Any]:
@@ -1303,19 +1438,23 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         if unknown:
             raise HTTPException(404, f"no VPN peer {unknown[0]!r}")
         by_owner: dict[str, list[str]] = {}
+        # activated devices: no config left to import (owner 2026-11-02)
+        done = [n for n in dict.fromkeys(body.names) if known[n]["activated"]]
         for n in dict.fromkeys(body.names):
-            if known[n]["email"]:
+            if known[n]["email"] and n not in done:
                 by_owner.setdefault(known[n]["email"], []).append(n)
-        skipped = [n for n in dict.fromkeys(body.names) if not known[n]["email"]]
+        skipped = [n for n in dict.fromkeys(body.names) if not known[n]["email"] or n in done]
         sent, failed = [], []
         for to, names in by_owner.items():
             try:
-                send(s, mail.password(cfg), mail.notice(s, to, names, body.kind))
+                send(s, mail.password(cfg), mail.notice(s, to, names, body.kind, known))
                 sent.append(to)
             except vpn.VpnError as exc:
                 failed.append(str(exc))
         summary = (f"{body.kind} notice: {len(sent)} of {len(by_owner)} mails sent"
-                   + (f" ({', '.join(sent)})" if sent else "") + (f"; no owner: {', '.join(skipped)}" if skipped else "")
+                   + (f" ({', '.join(sent)})" if sent else "")
+                   + (f"; no owner: {', '.join(n for n in skipped if n not in done)}" if set(skipped) - set(done) else "")
+                   + (f"; activated, config deleted: {', '.join(done)}" if done else "")
                    + (f"; failed: {'; '.join(failed)}" if failed else ""))
         audit(user, "mail-notice", ",".join(dict.fromkeys(body.names))[:200], not failed, summary,
               f"VPN: notice mail by {user}: {summary}")
@@ -1328,16 +1467,23 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         return Response(content, media_type=media, headers=headers)
 
+    def stored(request: Request, name: str) -> tuple[Who, dict[str, Any]]:
+        """The device, if its client config is still stored (deleted after activation: 410)."""
+        w, p, _ = scoped_peer(request, name)
+        if p["activated"]:
+            raise HTTPException(410, ACTIVATED)
+        return w, p
+
     @app.get("/api/peers/{name}/conf")
     def peer_conf(request: Request, name: str) -> Response:
-        user = scoped_peer(request, name)[0].name
+        user = stored(request, name)[0].name
         conf = do(vpn.client_conf, name)
         audit(user, "conf", name, True, "config downloaded", f"VPN: config of {name} downloaded by {user}")
         return private(conf, "text/plain", f"{name}.conf")
 
     @app.get("/api/peers/{name}/package")
     def peer_package(request: Request, name: str) -> Response:
-        w, p, _ = scoped_peer(request, name)
+        w, p = stored(request, name)
         user = w.name
         conf = do(vpn.client_conf, name)
         audit(user, "package", name, True, "package downloaded", f"VPN: package of {name} downloaded by {user}")
@@ -1345,7 +1491,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
 
     @app.get("/api/peers/{name}/qr")
     def peer_qr(request: Request, name: str) -> Response:
-        user = scoped_peer(request, name)[0].name
+        user = stored(request, name)[0].name
         svg = do(vpn.qr_svg, name)
         audit(user, "qr", name, True, "QR shown", f"VPN: QR code of {name} shown to {user}")
         return private(svg, "image/svg+xml")

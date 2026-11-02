@@ -12,6 +12,10 @@ WireGuard + nftables + wg-admin (FastAPI web UI and API; nginx TLS on :8443 -> a
   of several settings on the ticked devices in one go; 10/25/50/100/All rows per page. Rows show name, IP, profile,
   on/off and status; the arrow at the right opens the rest (Expand all / Collapse all). Status reloads with
   **Refresh** above the table, never on a timer.
+- **One config, one device:** a device must connect within its activation deadline (3 days by default, 1-30 in
+  Server settings) or it is switched off; after its first connection the server deletes the stored config (no QR or
+  .conf any more); a key used from several places at once (address flipping A, B, A within 10 minutes) is switched
+  off at once, until switched on by hand. Owner and admin copy address get a mail.
 - **Connection log:** connects, handshakes, roaming, session ends and WireGuard's own messages per device; admins
   search them in the Log tab. Each device has a hidden id that never changes and tags its lines: a group admin sees
   only the lines of devices in their groups (their whole history), nothing else. Kept locally with logrotate, optionally forwarded to a syslog server (UDP/TCP).
@@ -54,6 +58,11 @@ user name switches to light (kept per browser; without a choice the page follows
    - Phone: install the WireGuard app, tap **QR**, scan it in the app.
    - Computer: **.conf** (or the `.zip` with instructions), import it in the WireGuard client.
    - **Notify** mails the owner the setup (needs Server settings > Mail).
+   - The device must connect within its deadline ("activate by" in its status; days field on add, default in
+     Server settings > Activation deadline, group admins only if allowed there), else it is switched off; switching
+     it on gives the default again. After the first connection the config is gone from the server: a lost config
+     means revoke and add the device again. Server settings > Mail > Admin copy gets a copy of every setup/change
+     mail and the alerts.
 5. **Switch** a device off with its slider (the key stays) or **Revoke** it for good.
    - **Several at once:** tick devices (the header box ticks all in the list on screen; ticks are dropped when a device leaves the list; "Show" under
      the list: 10/25/50/100/All per page), **Bulk edit**, tick the settings to change

@@ -21,6 +21,7 @@ from .vpn import DESC, PROFILE, VpnError
 
 ROLES = ("admin", "group-admin")
 PW_HISTORY, PW_HISTORY_MAX = 24, 50
+DEADLINE_DAYS, DEADLINE_MIN, DEADLINE_MAX = 3, 1, 30
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -38,7 +39,14 @@ def load(path: Path) -> dict[str, Any]:
     # password history (owner 2026-10-29): the last N passwords can't be reused; 0 = off
     hist = data.get("pw_history", PW_HISTORY)
     hist = min(max(hist, 0), PW_HISTORY_MAX) if isinstance(hist, int) else PW_HISTORY
-    return {"groups": groups, "members": members, "totp_roles": roles, "pw_history": hist}
+    # activation deadline for new devices (owner 2026-11-02): default days, may group admins change it
+    days = data.get("deadline_days", DEADLINE_DAYS)
+    days = days if isinstance(days, int) and DEADLINE_MIN <= days <= DEADLINE_MAX else DEADLINE_DAYS
+    # devices switched off for a copied key: {name: {"id", "off", "at"}}; a manual switch-on sets off false, and
+    # only log lines after "at" count again
+    clones = {k: v for k, v in (data.get("clones") or {}).items() if isinstance(v, dict)}
+    return {"groups": groups, "members": members, "totp_roles": roles, "pw_history": hist, "deadline_days": days,
+            "group_deadline": data.get("group_deadline") is True, "clones": clones}
 
 
 def save(path: Path, data: dict[str, Any]) -> None:

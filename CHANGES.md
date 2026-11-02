@@ -2,6 +2,35 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-02: expand arrows stay put
+
+- The arrow of a row or Server settings part keeps its spot when it opens, so a second click finds it: it no longer
+  re-centres in the taller opened row or moves with the part's buttons, and the page keeps room for the scrollbar
+  (no sideways shift when the page starts to scroll).
+
+## 2026-11-02: activation deadline, config deleted after activation, copied-key switch-off
+
+- A device must connect once within its activation deadline or wg-admin switches it off (not revoked) and mails its
+  owner and the admin copy address. Status shows "activate by DATE", then "not activated". Switching it on gives it
+  the default deadline again; schedules never switch it back on.
+- Deadline setting (Server settings > Activation deadline): default days (1-30, 3 unless changed) and whether group
+  admins may pick their own. Add a device has a days field (admins: any 1-30; group admins: the default only,
+  unless allowed). CSV add and switch-on use the default. Applies to current devices too: on install
+  `vpn-peer deadlines` gives every device without a deadline one (now + 3 days, `ACTIVATE_DAYS` in vpn.env; once).
+- At a device's first connection the server deletes its stored config (the only copy of its private key there):
+  QR, .conf and .zip then answer "config deleted after activation: revoke and add the device again" and the row
+  shows a note instead. A profile change (single or bulk) lists such devices apart: "Revoke and Add again". New verb
+  `vpn-peer activated NAME`; `dump` has two more fields (activate-by, activated).
+- Copied key: when a device's address flips between IPs and back (3 changes within 10 minutes, e.g. A, B, A, B)
+  wg-admin switches it off at once (not revoked) and mails the owner and the admin copy address with the IPs and
+  times; one mail per event. Schedules leave it off; only a manual switch-on brings it back (and the check starts
+  afresh). All devices.
+- Server settings > Mail: **Admin copy** address. It gets a Bcc of every setup/change mail and the deadline and
+  copied-key alerts (before: Mail's sender address). Empty: no copy, alerts go to the owner only (the audit line
+  says "no admin address set").
+- Setup mails say: one device only, connect within the deadline, the stored copy is deleted after activation, a
+  config used on several devices is switched off.
+
 ## 2026-11-02: dark/light theme button
 
 - Sun/moon button next to the user name switches dark and light; the choice is kept per browser. Without a choice
