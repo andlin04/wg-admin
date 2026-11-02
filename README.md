@@ -1,41 +1,89 @@
 # wg-admin: WireGuard server + web UI
 
-A self-hosted WireGuard VPN server with a web UI, installed by one script on one Debian host. Each device gets its
-own key and a connection profile; the server's firewall lets a device reach only what its profile allows.
-WireGuard + nftables + wg-admin (FastAPI web UI and API; nginx TLS on :8443 -> app on 127.0.0.1:8080).
+A self-hosted WireGuard VPN server with a web UI, installed by one script on one Debian host.
+
+- Each device gets its own key and a connection profile.
+- The server's firewall lets a device reach only what its profile allows.
+- Built from WireGuard, nftables and wg-admin (a FastAPI web UI and API behind nginx with TLS on port 8443).
 
 ![Devices](docs/devices.png)
 
+**Contents:** [Features](#features) · [Screenshots](#screenshots) · [Install](#install) ·
+[Getting started](#getting-started) · [Roles](#users-groups-and-roles) · [Network](#network-nat-or-route) ·
+[Firewall](#firewall) · [Backup](#backup-and-restore) · [Security](#security) ·
+[Command line](#command-line) · [Files](#files) · [Changes](CHANGES.md)
+
 ## Features
-- **Devices:** add one or many (CSV), QR code for the phone app, `.conf` or a `.zip` for computers, mail the setup to
-  the owner, on/off switch, tags (ticked from a list) with filters, last handshake and traffic per device; bulk edit
-  of several settings on the ticked devices in one go; 10/25/50/100/All rows per page. Rows show name, IP, profile,
-  on/off and status; the arrow at the right opens the rest (Expand all / Collapse all). Status reloads with
-  **Refresh** above the table, never on a timer.
-- **One config, one device:** a device must connect within its activation deadline (3 days by default, 1-30 in
-  Server settings) or it is switched off; after its first connection the server deletes the stored config (no QR or
-  .conf any more); a key used from several places at once (address flipping A, B, A within 10 minutes) is switched
-  off at once, until switched on by hand. Owner and admin copy address get a mail.
-- **Connection log:** connects, handshakes, roaming, session ends and WireGuard's own messages per device; admins
-  search them in the Log tab. Each device has a hidden id that never changes and tags its lines: a group admin sees
-  only the lines of devices in their groups (their whole history), nothing else. Kept locally with logrotate, optionally forwarded to a syslog server (UDP/TCP).
-- **Lists on every tab** (profiles, schedules, groups, users, server settings) open per row or all at once.
-- **Connection profiles:** split tunnel (home networks only), full tunnel (all traffic), or single hosts and ports.
-  Enforced on the server (nftables), not only in the client config.
-- **Schedules:** weekly hours, calendar dates, valid from / until; devices switch on and off by themselves.
-- **Users and groups:** admins and group admins (manage only their groups' devices), sign-in hours and expiry per
-  account, optional authenticator app (TOTP) per account or required per role, password history.
-- **Server settings:** endpoint, port, keepalive, NAT or routed mode, transit interface, readable firewall rules with
-  an editor, mail (SMTP) settings, logging (days kept, syslog server), reboot.
-- **Changes:** [CHANGES.md](CHANGES.md).
-- **Dark or light theme:** button next to the user name; follows the system until picked.
-- **Health map:** devices, internet, router, VPN server and LAN/DNS with live checks.
-- **Backup:** encrypted export (age) with every key; restore on a new host keeps all devices working.
-- **API:** every UI action is an API call; tokens for scripts (`python3 -m wgadmin token NAME`).
+
+### Devices
+- Add one device, or many at once from a CSV file.
+- Set up a phone by scanning a QR code in the WireGuard app.
+- Set up a computer with a `.conf` file, or a `.zip` that includes instructions.
+- Mail the setup to the device's owner.
+- Switch a device off and on with a slider; its key stays. **Revoke** removes it for good.
+- Tag devices and filter the list by tag.
+- Each row shows name, IP, profile, on/off and status. The arrow on the right opens the rest: last handshake,
+  traffic, pickers and actions. **Expand all** and **Collapse all** open or close every row.
+- **Bulk edit:** tick devices, then change several settings on all of them in one go.
+- Show 10, 25, 50, 100 or all rows per page.
+- Status reloads when you press **Refresh**, never on a timer.
+- The other tabs' lists (profiles, schedules, groups, users, server settings) also open per row or all at once.
+
+### One config, one device
+Each configuration is meant for exactly one device.
+
+| Rule | What happens |
+| --- | --- |
+| **Activation deadline** | A new device must connect within its deadline (3 days by default, 1 to 30). Otherwise it is switched off. |
+| **Stored config deleted** | After the device's first connection, the server deletes its copy of the config. QR, `.conf` and `.zip` are then gone; a lost config means revoke and add the device again. |
+| **Copied key detection** | If one key is used from two places at the same time, the device's address flips back and forth. When it changes 3 times within 10 minutes and returns to an earlier address (A, B, A), the device is switched off at once. |
+
+- Owner and admin copy address get a mail for every switch-off, with the addresses and times.
+- A device switched off for a copied key stays off. Schedules don't switch it back on; only an admin can.
+- Limit: copied key detection needs both copies connected at the same time. A copy used while the original is
+  offline is not detected.
+
+### Access control
+- **Connection profiles:**
+  - split tunnel (home networks only)
+  - full tunnel (all traffic)
+  - single hosts and ports
+
+  The server enforces them with nftables; they are not just client settings.
+- **Schedules:** weekly hours, calendar dates, valid from and until. Devices switch on and off by themselves.
+
+### Users and sign-in
+- Two roles: **admin** and **group admin**. Group admins manage only their groups' devices.
+- Sign-in hours and an expiry date per account.
+- Optional authenticator app (TOTP), per account or required for a whole role.
+- Password history; every user can change their own password.
+
+### Logs and monitoring
+- **Connection log:** connects, handshakes, roaming (Wi-Fi ⇄ mobile), session ends and WireGuard's own messages,
+  per device. Search it in the **Log** tab.
+- Group admins see the full history of the devices in their groups, and nothing else (each device has a hidden,
+  fixed id that tags its log lines).
+- Logs are kept locally (logrotate) and can be forwarded to a syslog server over UDP or TCP.
+- **Health map:** devices, internet, router, VPN server and LAN/DNS, with live checks.
+- **Prometheus metrics:** WireGuard status and the last handshake per device, written to node_exporter's
+  textfile collector. Only installed if node_exporter is already on the host.
+- **Audit:** every change goes to the journal. Optional: also sent to an event URL (`WGADMIN_EVENT_URL`).
+
+### Server and admin
+- **Server settings:**
+  - endpoint, port and keepalive
+  - NAT or routed mode, transit interface
+  - firewall rules shown in readable form, with an editor
+  - mail (SMTP) with a test button, and an **admin copy** address that gets every setup mail and alert
+  - activation deadline
+  - logging
+  - reboot
+- **Backup:** an encrypted export (age) with every key; restoring it on a new host keeps all devices working.
+- **API:** every UI action is an API call; tokens let scripts use it.
+- **Dark or light theme:** the button next to the user name. Follows the system setting until you pick one.
 
 ## Screenshots
-Made-up demo data (no real names, addresses or keys). Dark theme; the sun/moon button next to the
-user name switches to light (kept per browser; without a choice the page follows the system setting).
+Made-up demo data (no real names, addresses or keys).
 
 | | |
 | --- | --- |
@@ -47,106 +95,147 @@ user name switches to light (kept per browser; without a choice the page follows
 | ![Profiles open](docs/profiles-open.png) Connection profiles, all opened | ![Server open](docs/server-open.png) Server settings, all parts opened |
 | ![Devices, light](docs/devices-light.png) Light theme: devices | ![Device open, light](docs/expanded-light.png) Light theme: a device opened |
 
-## Using it
-1. **Sign in** at `https://HOST:8443/` with the first admin account (install step 3 below).
-2. **Server settings:** check the endpoint (the public name or address and port the devices dial) and the network
-   mode (NAT or Route, see below).
-3. **Connection profiles:** keep the default `split` and `full`, or add your own (routes, DNS, allowed hosts/ports).
-   Changing a profile's routes, DNS or IPv6 marks its devices "re-import": they need the new QR or config.
-   Allowed destinations live on the server: no re-import.
-4. **Devices > Add a device:** name (e.g. `anna-phone`), profile, optional group, schedule, tags and owner email.
+## Install
+`install.sh` sets up everything, WireGuard included:
+- installs `wireguard-tools`, nftables, nginx and the Python packages from Debian's repositories
+- creates the server key and the `wg0` interface
+- starts `wg-quick@wg0` at boot
+
+Nothing needs to be installed first; the WireGuard kernel module is part of Debian 12/13's kernel.
+
+1. **Host:** a Debian 12/13 VM or LXC, with UDP 51820 forwarded to it by the router.
+   For an unprivileged LXC, the host must load the `wireguard` module.
+2. **Install** as root:
+   ```
+   git clone <this repo> /root/wg-admin
+   bash /root/wg-admin/install.sh --endpoint vpn.example.org:51820
+   ```
+   - It detects the LAN interface, gateway, DNS and LAN subnet and writes them to `/etc/wireguard/vpn.env`.
+     To override: `LAN_IF=ens18 CLIENT_DNS=10.0.0.53 bash install.sh`.
+   - TLS is self-signed until you sign `/etc/wg-admin/tls.csr`.
+   - Behind an HTTP proxy: export `http_proxy` and `https_proxy` first (apt and git use them).
+3. **First admin:**
+   ```
+   cd /opt/wg-admin && sudo -u wgadmin python3 -m wgadmin set-password NAME
+   ```
+   Then open `https://HOST:8443/`. Everything else is set in the UI.
+4. **Update:** `git -C /root/wg-admin pull && bash /root/wg-admin/install.sh`. Keys, devices and settings stay.
+5. **Remove:** `bash uninstall.sh` keeps keys and devices; `bash uninstall.sh --purge` deletes them (export first).
+
+## Getting started
+1. **Sign in** at `https://HOST:8443/` with the first admin account.
+2. **Server settings:**
+   - Check the endpoint: the public name or address and port the devices dial.
+   - Check the network mode (see [NAT or Route](#network-nat-or-route)).
+   - Optional: set up Mail, so wg-admin can mail setups and alerts.
+3. **Connection profiles:** keep the default `split` and `full`, or add your own (routes, DNS, allowed hosts and
+   ports).
+   - Changing a profile's routes, DNS or IPv6 marks its devices **re-import**: they need a new QR or config.
+   - Allowed destinations are enforced on the server, so changing them needs no re-import.
+4. **Devices > Add a device:** name (e.g. `anna-phone`), profile, and optionally group, schedule, tags, owner email
+   and activation days.
    - Phone: install the WireGuard app, tap **QR**, scan it in the app.
-   - Computer: **.conf** (or the `.zip` with instructions), import it in the WireGuard client.
-   - **Notify** mails the owner the setup (needs Server settings > Mail).
-   - The device must connect within its deadline ("activate by" in its status; days field on add, default in
-     Server settings > Activation deadline, group admins only if allowed there), else it is switched off; switching
-     it on gives the default again. After the first connection the config is gone from the server: a lost config
-     means revoke and add the device again. Server settings > Mail > Admin copy gets a copy of every setup/change
-     mail and the alerts.
-5. **Switch** a device off with its slider (the key stays) or **Revoke** it for good.
-   - **Several at once:** tick devices (the header box ticks all in the list on screen; ticks are dropped when a device leaves the list; "Show" under
-     the list: 10/25/50/100/All per page), **Bulk edit**, tick the settings to change
-     (profile, group, schedule, enabled, tags, owner email) and set their values, **Apply**: all of them go to every
-     ticked device in one go (enabled last). Each device gets the same checks as a single edit; refused ones are
-     listed. Settings marked * may need a re-imported profile on the client: the panel and the confirm show
-     which ticked devices (only those whose routes, DNS or IPv6 change).
-6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`), pick it on the device. A manual switch holds until
-   the schedule's next change.
-7. **Others manage their own devices (optional):** Groups > add a group with its profiles and schedules, then
-   Users > add a user with the role group admin and tick the group. Group admins also get the Log tab, limited to
-   their groups' devices.
+   - Computer: download **.conf** (or the `.zip`) and import it in the WireGuard client.
+   - **Notify** mails the setup to the owner.
+   - The device must connect before its **activate by** time. Switching a late device back on gives it the
+     default deadline again.
+5. **Several devices at once:** tick them (the header box ticks every device on screen), then **Bulk edit**.
+   - Tick the settings to change: profile, group, schedule, enabled, tags, owner email.
+   - **Apply** changes every ticked device; each one gets the same checks as a single edit, and refused devices are
+     listed.
+   - Settings marked * may need a re-import; the panel shows which devices.
+6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`) and pick it on the device.
+   - wg-admin checks schedules every minute in the host's local time (`timedatectl set-timezone ...`).
+   - Switching a device by hand holds until the schedule's next change.
+7. **Let others manage their own devices (optional):** create a group under **Groups** with its profiles and
+   schedules. Then under **Users**, add a user with the role group admin and tick the group.
+8. **Authenticator (optional):** **Account > Set up authenticator**, scan the QR code, enter a code, and save the 10
+   recovery codes.
+
+## Users, groups and roles
+
+| | Admin | Group admin |
+| --- | --- | --- |
+| Devices | all | only in their groups; new devices only into them |
+| Profiles and schedules | create and edit | use the ones linked to their groups; create schedules for them |
+| Activation days on add | 1 to 30 | the default, unless Server settings allows more |
+| Log tab | everything | their groups' devices only |
+| Server settings, health, groups, users | yes | no |
+
+- The server checks these permissions on every request, not just in the UI.
+- **Groups tab:** a group is a set of devices plus the profiles and schedules linked to it.
+- **Users tab:** add a user, set role, groups, sign-in hours and expiry; disable; reset password or authenticator;
+  delete. You can also require an authenticator for a whole role.
+- **Default admin:** the first account keeps its role. It can't be disabled, scheduled, expired or deleted.
+- Changing a user's role, groups, state or password ends their sessions.
+
+## Network: NAT or Route
+Set under **Server settings > Network**.
+
+| Mode | Devices appear as | The router needs |
+| --- | --- | --- |
+| **NAT** (default) | this host | only the UDP port forward |
+| **Route** | their own `10.66.0.N` | a route for `10.66.0.0/24` to this host, and outbound NAT for it |
+
+Optional: a second interface can carry the decrypted traffic (transit interface + next hop).
+
+## Firewall
+- `vpn-peer` writes one nftables table, `inet wgadmin`, to `/etc/nftables.d/wgadmin.nft`, and replaces only
+  that table.
+- A host with its own `/etc/nftables.conf` needs `include "/etc/nftables.d/*.nft"` in it.
+- Dry run: `vpn-peer check`.
+- By default nothing on the LAN side can open a connection to a device.
+- Route mode only: to let the LAN reach a server-type device (SSH, metrics), set
+  `INBOUND=SRC>DST[/tcp|udp/PORT],...` in `/etc/wireguard/vpn.env`, then run `vpn-peer firewall`.
+  Example: `INBOUND=10.1.0.10/32>10.66.0.4/32/tcp/22`.
+
+## Backup and restore
+- **Export** (root, interactive): `vpn-peer export /root/vpn-YYYYMMDD.age`.
+  - age asks for a passphrase. Keep it somewhere other than the file.
+  - The file holds every key.
+- **Restore on a new host:**
+  1. Run `install.sh` (install step 2).
+  2. `vpn-peer import FILE`
+  3. Run `install.sh` again.
+  4. `systemctl restart wg-quick@wg0 wg-admin`
+
+  The previous state stays in `/etc/wireguard.before-import-TIME`. Devices keep working if the new host gets the
+  same endpoint, because the server key comes from the export.
 
 ## Security
-- Passwords: stored as scrypt hashes (N=2^15, r=8, p=1, 16-byte salt per password), never in clear text. Password
-  history (default 24, Users > Sign-in policy). 5 failed sign-ins within 15 minutes block that network address;
-  admins can reset it (Users > Reset lockout).
-- Sessions: HttpOnly, Secure, SameSite=Strict cookie; changes only from wg-admin's own pages. Any role, group,
-  state or password change ends that user's sessions.
-- Privileges: the app runs as the unprivileged user `wgadmin` and reaches root only through `vpn-gate`, which accepts
-  a fixed set of checked requests. Device keys and configs stay on the server (600).
-- Every change is logged (journal; optional event URL).
+- **Passwords:** scrypt hashes (N=2^15, r=8, p=1, a 16-byte salt per password), never stored in clear text.
+  The password history remembers the last 24 by default (Users > Sign-in policy).
+- **Lockout:** 5 failed sign-ins within 15 minutes block that network address. Admins can reset it (Users > Reset
+  lockout).
+- **Sessions:** HttpOnly, Secure, SameSite=Strict cookie. Changes are accepted only from wg-admin's own pages.
+- **Privileges:** the app runs as the unprivileged user `wgadmin`. It reaches root only through `vpn-gate`, which
+  accepts a fixed set of checked requests.
+- **Keys:** device keys stay on the server (mode 600). Each stored client config is deleted after the device's first
+  connection.
+- **Data files:** `/etc/wg-admin/` (users, access, schedules, TOTP; mode 600, owner `wgadmin`).
+
+## Command line
+
+| Command | Does |
+| --- | --- |
+| `sudo -u wgadmin python3 -m wgadmin set-password NAME` | Set a password; creates the first admin. Also the fix when locked out. Scripted: pipe the password on stdin. |
+| `sudo -u wgadmin python3 -m wgadmin totp-reset NAME` | Remove a user's authenticator (lost phone). |
+| `sudo -u wgadmin python3 -m wgadmin token NAME` | API token for scripts, printed once (`Authorization: Bearer wga_...`). The same NAME replaces its old token. |
+| `sudo -u wgadmin python3 -m wgadmin token-revoke NAME` | Revoke an API token. |
+| `vpn-peer check` | Firewall dry run. |
+| `vpn-peer firewall` | Apply the firewall again. |
+| `vpn-peer export FILE` / `vpn-peer import FILE` | Encrypted backup and restore. |
+
+## Files
 
 | File | Role |
 | --- | --- |
-| install.sh | Idempotent install on any Debian 12/13 host (root): packages, wg0, firewall, wg-admin, nginx, metrics |
-| uninstall.sh | Removes it; data kept unless `--purge`; wg0 always stopped (no peers without the firewall) |
-| vpn-peer.sh | All VPN logic (installed as /usr/local/sbin/vpn-peer) |
-| vpn-gate.sh | The only root path for wg-admin (fixed requests) |
-| wgadmin/ | FastAPI app + static UI |
+| install.sh | Install on any Debian 12/13 host (root), safe to run again: packages, wg0, firewall, wg-admin, nginx, logging, metrics |
+| uninstall.sh | Removes it; data kept unless `--purge`; wg0 always stopped (no devices without the firewall) |
+| vpn-peer.sh | All VPN logic (installed as `/usr/local/sbin/vpn-peer`) |
+| vpn-gate.sh | wg-admin's only way to root (a fixed set of requests) |
+| wgadmin/ | FastAPI app and the static UI |
 | wg-admin.service, wg-admin.nginx.conf | App on 127.0.0.1:8080; nginx TLS front on :8443 |
-| docs/ | README screenshots (source repo: `scripts/workstation/wgadmin_shots.py`, demo data) |
-| setup-vpn1.sh | (source repo only) homelab wrapper: install.sh with site values + portal SSO |
-
-## Install on a new host
-install.sh sets up everything, WireGuard included: it installs `wireguard-tools`, nftables, nginx and the Python
-packages from Debian's repositories, creates the server key and wg0, and starts `wg-quick@wg0` at boot. Nothing to
-install first; the WireGuard kernel module is part of Debian 12/13's kernel.
-
-1. Debian 12/13 VM or LXC; UDP 51820 forwarded to it by the router. Unprivileged LXC: the host loads the
-   `wireguard` module.
-2. As root: `git clone <this repo> /root/wg-admin && bash /root/wg-admin/install.sh --endpoint vpn.example.org:51820`.
-   It detects the LAN interface, gateway, DNS and LAN subnet into /etc/wireguard/vpn.env (override:
-   `LAN_IF=ens18 CLIENT_DNS=10.0.0.53 bash install.sh`). TLS: self-signed until you sign /etc/wg-admin/tls.csr.
-   Behind an HTTP proxy: export `http_proxy`/`https_proxy` first (apt and git use them).
-3. First admin: `cd /opt/wg-admin && sudo -u wgadmin python3 -m wgadmin set-password NAME`; open https://HOST:8443/.
-   Scripted: `echo "$PW" | sudo -u wgadmin python3 -m wgadmin set-password NAME` (no terminal: first stdin line).
-   Everything else (endpoint, DNS, routes, NAT/Route, mail, devices) is set in the UI.
-4. Update: `git -C /root/wg-admin pull && bash /root/wg-admin/install.sh` (keys, devices and settings stay).
-5. Remove: `bash uninstall.sh` (keeps keys and peers) or `bash uninstall.sh --purge` (export first).
-
-## Two-step sign-in and schedules
-- Authenticator (TOTP, Google Authenticator or any app): signed in on this page, Account > Set up authenticator,
-  scan, enter a code; save the 10 recovery codes. Locked out: `sudo -u wgadmin python3 -m wgadmin totp-reset NAME`.
-- Schedules: weekly hours, calendar dates, valid from / expires; pick one per device. wg-admin switches devices
-  every minute in this host's local time (`timedatectl set-timezone ...`). A manual switch holds until the
-  schedule's next change. Data: /etc/wg-admin/totp.json, schedules.json (600 wgadmin).
-
-## Users, groups and roles
-- Roles: **admin** (everything) and **group admin** (devices of one or more groups; adds devices only into them,
-  picks profiles and schedules an admin linked to the group, creates schedules for its groups; no Server settings,
-  health, profiles, groups or users; the Log tab shows only its groups' devices). Every route checks this on the server.
-- Users tab (admins): add, role, groups, sign-in schedule, expiry, disable, reset password or authenticator, delete;
-  "require an authenticator" per role. The first account is the default admin: it keeps its role and can't be
-  disabled, scheduled, expired or deleted. Any role, group, state or password change ends that user's sessions.
-- Groups tab (admins): group = devices + linked profiles + linked schedules. Data: /etc/wg-admin/access.json and
-  users.json (600 wgadmin). Locked out: `sudo -u wgadmin python3 -m wgadmin set-password NAME`.
-
-## NAT or Route
-Server settings > Network. NAT (default): devices appear as this host; the router needs only the UDP port forward.
-Route: devices keep their 10.66.0.N; the router needs a route for 10.66.0.0/24 to this host (and outbound NAT for
-it). A second interface can carry the decrypted traffic (transit interface + next hop).
-
-## Firewall
-vpn-peer writes one table, `inet wgadmin`, to /etc/nftables.d/wgadmin.nft and replaces only that table.
-On a host with its own /etc/nftables.conf, add `include "/etc/nftables.d/*.nft"` to it.
-Dry run: `vpn-peer check`.
-Nothing on the LAN side can open a connection to a device by default. Route mode only: to let the LAN reach a
-server-type device (SSH, metrics), set `INBOUND=SRC>DST[/tcp|udp/PORT],...` in /etc/wireguard/vpn.env, e.g.
-`INBOUND=10.1.0.10/32>10.66.0.4/32/tcp/22`, then `vpn-peer firewall`.
-
-## Backup and restore
-- Export (root, interactive): `vpn-peer export /root/vpn-YYYYMMDD.age`. age asks for a passphrase. The file holds
-  every key; keep the passphrase somewhere else.
-- Restore on a new host: install.sh (step 2), then `vpn-peer import FILE`, then install.sh again, then
-  `systemctl restart wg-quick@wg0 wg-admin`. The previous state stays in /etc/wireguard.before-import-TIME.
-  Devices keep working when the new host gets the same endpoint (server key comes from the export).
+| wg-connlog.* | Connection log, every 30 seconds |
+| wg-metrics.* | Prometheus metrics, every minute (only with node_exporter) |
+| docs/ | Screenshots for this README |

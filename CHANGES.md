@@ -2,6 +2,12 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-02: README rewritten
+
+- Features grouped by area, a contents line, short bullets and tables (roles, NAT or Route, command line).
+- Added: Prometheus metrics, own password change, mail test button, the copied-key detection limit, `token-revoke`,
+  wg-connlog and wg-metrics in the file list.
+
 ## 2026-11-02: expand arrows stay put
 
 - The arrow of a row or Server settings part keeps its spot when it opens, so a second click finds it: it no longer
