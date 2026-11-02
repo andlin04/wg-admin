@@ -108,6 +108,7 @@ if systemctl is-active -q systemd-networkd; then
     rm /etc/systemd/networkd.conf.d/wg-admin.conf.new
   fi
 fi
+/usr/local/sbin/vpn-peer ids  # device ids for the Log tab's group filter (older peers get one once)
 /usr/local/sbin/vpn-peer firewall
 # Disabled peers: wg-quick loads all of wg0.conf at boot; vpn-peer sync drops them right after. The firewall already
 # leaves them out of every peer set, so the gap only allows a handshake, no traffic.

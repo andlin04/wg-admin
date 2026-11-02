@@ -10,7 +10,9 @@
 #   vpn-peer remove NAME
 #   vpn-peer list                 name, profile, address, latest handshake
 #   vpn-peer dump                 tab-separated: name profile address handshake rx tx created tags reimport(0|1) email
-#                                 disabled(0|1)
+#                                 disabled(0|1) id
+#   vpn-peer ids                  give every peer block without one a "# id:" line (install.sh): a UUID that never
+#                                 changes; wg-connlog and the audit log tag lines with it (Log tab for group admins)
 #   vpn-peer disable|enable NAME  VPN access off/on, setup kept (owner 2026-10-27): a "# disabled: 1" line in the
 #                                 block keeps the peer out of the live wg0 and out of the firewall's peer sets
 #   vpn-peer sync                 load wg0.conf minus disabled peers into wg0 (wg-quick@wg0 ExecStartPost at boot)
@@ -346,8 +348,8 @@ case "$cmd" in
     done
     [ -n "$ip" ] || { echo "no free address"; exit 1; }
     key=$(wg genkey); pub=$(wg pubkey <<<"$key"); psk=$(wg genpsk)
-    printf '\n[Peer]\n# name: %s\n# profile: %s\n# created: %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32,fd66:66::%s/128\n' \
-      "$name" "$profile" "$(date +%s)" "$pub" "$psk" "$ip" "${ip##*.}" >> "$CONF"
+    printf '\n[Peer]\n# name: %s\n# id: %s\n# profile: %s\n# created: %s\nPublicKey = %s\nPresharedKey = %s\nAllowedIPs = %s/32,fd66:66::%s/128\n' \
+      "$name" "$(cat /proc/sys/kernel/random/uuid)" "$profile" "$(date +%s)" "$pub" "$psk" "$ip" "${ip##*.}" >> "$CONF"
     (umask 077; cat > "$DIR/$name.conf" <<EOF
 [Interface]
 PrivateKey = $key
@@ -423,6 +425,15 @@ EOF
     reload
     routing
     ;;
+  ids)
+    # Comment lines only: the live wg0 and the client configs stay as they are (map wg-admin-log-groups, 2026-11-02).
+    awk 'BEGIN{RS=""; ORS="\n\n"; uu="cat /proc/sys/kernel/random/uuid"}
+      /# name: / && !/\n# id: / { uu | getline u; close(uu); sub(/# name: [^\n]*/, "&\n# id: " u) } {print}' \
+      "$CONF" > "$CONF.new"
+    if cmp -s "$CONF" "$CONF.new"; then rm "$CONF.new"; else
+      chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"; logger -t vpn-peer "ids added"; echo "ids added"
+    fi
+    ;;
   conf)
     need_peer
     cat "$DIR/$name.conf"
@@ -448,14 +459,14 @@ EOF
     declare -A hs rx tx
     while IFS=$'\t' read -r pub _ _ _ t r x _; do hs[$pub]=$t; rx[$pub]=$r; tx[$pub]=$x; done \
       < <(wg show wg0 dump | tail -n +2)
-    awk '/^\[Peer\]/ {n=""; p="split"; c=0; g="-"; m="-"; x=0} /^# name:/ {n=$3} /^# profile:/ {p=$3} /^# created:/ {c=$3}
-         /^# tags:/ {g=$3} /^# email:/ {m=$3} /^# disabled: 1$/ {x=1} /^PublicKey/ {k=$3}
-         /^AllowedIPs/ && n {split($3, a, ","); print n, p, c, k, a[1], g, m, x; n=""}' "$CONF" |
-      while read -r n p c k a g m x; do
+    awk '/^\[Peer\]/ {n=""; p="split"; c=0; g="-"; m="-"; x=0; u="-"} /^# name:/ {n=$3} /^# profile:/ {p=$3} /^# created:/ {c=$3}
+         /^# tags:/ {g=$3} /^# email:/ {m=$3} /^# disabled: 1$/ {x=1} /^# id:/ {u=$3} /^PublicKey/ {k=$3}
+         /^AllowedIPs/ && n {split($3, a, ","); print n, p, c, k, a[1], g, m, x, u; n=""}' "$CONF" |
+      while read -r n p c k a g m x u; do
         t=${hs[$k]:-0} ri=0
         grep -Fqx "$n" "$REIMPORT" 2>/dev/null && ri=1
         if [ "$cmd" = dump ]; then
-          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$p" "${a%/32}" "$t" "${rx[$k]:-0}" "${tx[$k]:-0}" "$c" "$g" "$ri" "$m" "$x"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$p" "${a%/32}" "$t" "${rx[$k]:-0}" "${tx[$k]:-0}" "$c" "$g" "$ri" "$m" "$x" "$u"
         else
           if [ "$t" = 0 ]; then seen=never; else seen=$(date -d "@$t" '+%F %T'); fi
           echo "$n $p $a $seen ${g/#-/}"

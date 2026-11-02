@@ -6,6 +6,7 @@ let root = null, onAuth = () => location.reload();
 let PROFILES = [], SCHEDULES = [], tagFilter = "", info = null;
 const PICKED = new Set();  // device names ticked for "Email owners" and "Bulk edit"
 const BULK = { open: false, on: {}, val: {} };  // the Bulk edit panel survives re-renders (map wg-admin-bulk)
+const OPENED = new Set();  // device rows expanded to show their settings and actions (collapsed by default)
 
 const $ = (id) => root.querySelector("#" + id);
 function el(tag, cls, text) {
@@ -20,6 +21,7 @@ const ICONS = {
   server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
   box: '<path d="M21 8l-9-5-9 5 9 5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
   device: '<rect x="6" y="3" width="12" height="18" rx="2"/><path d="M11 17h2"/>',
+  chev: '<path d="m9 6 6 6-6 6"/>',
 };
 function icon(name, cls) {
   const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -85,7 +87,7 @@ const MARKUP = `
     <button type="button" class="segbtn vpnadmin" data-vview="server" aria-pressed="false">Server settings</button>
     <button type="button" class="segbtn vpnadmin" data-vview="groups" aria-pressed="false">Groups</button>
     <button type="button" class="segbtn vpnadmin" data-vview="users" aria-pressed="false">Users</button>
-    <button type="button" class="segbtn vpnadmin" data-vview="log" aria-pressed="false">Log</button></div>
+    <button type="button" class="segbtn" data-vview="log" aria-pressed="false">Log</button></div>
   <!-- Log (map wg-admin-log): admins only; connection log, kernel WireGuard messages, admin actions -->
   <div class="vpnview" id="vpnvlog" hidden>
   <div class="pagehead vpnphead"><div><h2>Log</h2><p>Connections (connect, handshake, roam, end), WireGuard's own
@@ -408,10 +410,6 @@ async function act(p, what, to) {
       const typed = prompt(`Owner's email for ${p.name} (empty = none):`, p.email || "");
       if (typed === null) return;
       await api(peerPath(p.name) + "/email", { method: "POST", body: JSON.stringify({ email: typed.trim() }) });
-    } else if (what === "tags") {
-      const typed = prompt(`Tags for ${p.name} (comma-separated, empty = none):`, p.tags.join(", "));
-      if (typed === null) return;
-      await api(peerPath(p.name) + "/tags", { method: "POST", body: JSON.stringify({ tags: tagList(typed) }) });
     } else {
       if (!confirm(`Switch ${p.name} to profile ${to}? The device must import the new config afterwards.`)) { loadPeers(); return; }
       await api(peerPath(p.name) + "/profile", { method: "POST", body: JSON.stringify({ profile: to }) });
@@ -474,7 +472,7 @@ async function saveBulk(ev) {
 
 // List tables (owner 2026-10-27): a filter box filters as you type, PAGE rows per page with prev/next.
 const PAGE = 25;  // default rows per page (paged)
-const PAGES = { devices: 0, profiles: 0, schedules: 0 };
+const PAGES = { devices: 0, profiles: 0, schedules: 0, log: 0 };
 // hit(item, term): optional extra match beyond the text, e.g. an IP inside a profile's routes
 function matching(items, inputId, text, hit) {
   const terms = $(inputId).value.toLowerCase().split(/\s+/).filter(Boolean);
@@ -541,41 +539,90 @@ function paged(key, items, rerender) {
   return [items.slice(at * size, (at + 1) * size), nav];
 }
 
+// Collapsible rows and sections (owner 2026-11-02): "kind:name" in OPENED = expanded; the arrow sits at the right
+const isOpen = (kind, name) => OPENED.has(`${kind}:${name}`);
+function chevBtn(kind, name, rerender) {
+  const open = isOpen(kind, name), b = el("button", "vpnrowhead");
+  b.type = "button";
+  b.setAttribute("aria-expanded", String(open));
+  b.setAttribute("aria-label", `${open ? "Hide" : "Show"} details of ${name}`);
+  b.title = open ? "Hide details" : "Show details";
+  b.appendChild(icon("chev", "chev"));
+  b.onclick = () => { open ? OPENED.delete(`${kind}:${name}`) : OPENED.add(`${kind}:${name}`); rerender(); };
+  return b;
+}
+function chevCell(kind, name, rerender) { const td = el("td", "vpnchevtd"); td.appendChild(chevBtn(kind, name, rerender)); return td; }
+// a details row under an item's main row, across all columns
+function subRow(cols, ...nodes) { const tr = el("tr", "vpnsub"), td = el("td"); td.colSpan = cols; td.append(...nodes); tr.appendChild(td); return tr; }
+function openAllBtn(kind, names, rerender) {
+  const all = names.length > 0 && names.every((n) => isOpen(kind, n)), b = el("button", "btn sm vpnopenall", all ? "Collapse all" : "Expand all");
+  b.type = "button";
+  b.setAttribute("aria-expanded", String(all));
+  b.onclick = () => { for (const n of names) all ? OPENED.delete(`${kind}:${n}`) : OPENED.add(`${kind}:${n}`); rerender(); };
+  return b;
+}
+function openAllBar(kind, names, rerender) { const d = el("div", "vpnopenbar"); d.appendChild(openAllBtn(kind, names, rerender)); return d; }
+
+// Server settings: each part (Server, Network, Firewall, Mail, Logging) folds to its heading and a summary line.
+// mount() wraps each heading and what follows it up to the next heading in a section.
+function foldSections() {
+  const view = $("vpnvserver");
+  for (const h of [...view.querySelectorAll(":scope > .pagehead")]) {
+    const sec = el("section", "vpnsec"), body = el("div", "vpnsecbody"), h2 = h.querySelector("h2");
+    sec.dataset.sec = h2.textContent;
+    h.before(sec);
+    while (h.nextElementSibling && !h.nextElementSibling.classList.contains("pagehead")) body.appendChild(h.nextElementSibling);
+    h2.after(el("div", "meta vpnsecsum"));
+    sec.append(h, body);
+  }
+  view.prepend(el("div", "vpnopenbar"));
+  syncSections();
+}
+function syncSections() {
+  const view = $("vpnvserver"), secs = [...view.querySelectorAll(".vpnsec")], names = secs.map((s) => s.dataset.sec);
+  for (const s of secs) {
+    s.classList.toggle("open", isOpen("sec", s.dataset.sec));
+    const head = s.querySelector(".pagehead"), old = head.querySelector(":scope > .vpnrowhead"), b = chevBtn("sec", s.dataset.sec, syncSections);
+    old ? old.replaceWith(b) : head.appendChild(b);
+  }
+  view.querySelector(".vpnopenbar").replaceChildren(openAllBtn("sec", names, syncSections));
+}
+const secSum = (name, text) => { const s = $("vpnvserver").querySelector(`.vpnsec[data-sec="${name}"] .vpnsecsum`); if (s) s.textContent = text; };
 function renderProfiles() {
-  const box = $("vpnpbox"), wrap = el("div", "tablewrap"), t = el("table");
+  const box = $("vpnpbox"), wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
   const found = matching(PROFILES, "vpnpq", (p) => [p.name, p.description, ...p.routes, ...p.dns, ...(p.allow || [])].join(" "), reaches);
   if (!found.length) { box.replaceChildren(el("div", "nodata", "No profile matches the filter.")); return; }
   const [rows, nav] = paged("profiles", found, renderProfiles);
-  t.innerHTML = "<thead><tr><th>Profile</th><th>Routes</th><th class=\"kb-hide-sm\">DNS</th><th>Devices</th><th></th></tr></thead>";
-  const tb = el("tbody");
+  t.innerHTML = "<thead><tr><th>Profile</th><th>Routes</th><th>Devices</th><th></th></tr></thead>";
   for (const p of rows) {
-    const tr = el("tr"), who = el("td", "vpnwho"), acts = el("td"), row = el("div", "userrow-actions");
-    who.append(el("strong", "", p.name), el("div", "meta", p.description));
-    const routes = el("td", "mono", p.routes.join(", "));
-    routes.append(el("div", "meta", p.ipv6 ? "IPv6 on" : "IPv6 off"));
-    if ((p.allow || []).length) routes.append(el("div", "meta", "Allowed only: " + p.allow.join(", ")));
-    tr.append(who, routes, el("td", "mono kb-hide-sm", p.dns.join(", ") || "device's own"),
-              el("td", "num", String(p.peers)));
-    const edit = el("button", "btn sm", "Edit"), del = el("button", "btn sm danger", "Delete");
-    edit.type = del.type = "button";
-    edit.onclick = () => profileForm(p);
-    del.disabled = p.peers > 0 || PROFILES.length < 2;
-    del.title = p.peers ? "In use: move its devices to another profile first" : "";
-    del.onclick = async () => {
-      const typed = prompt(`Delete profile ${p.name}? Type the name to confirm.`);
-      if (typed === null) return;
-      try { await api(`api/profiles/${encodeURIComponent(p.name)}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" }); }
-      catch (x) { alert(x.message); }
-      loadPeers();
-    };
-    row.append(edit, del);
-    acts.appendChild(row);
-    tr.appendChild(acts);
+    const tb = el("tbody", "vpnitem"), tr = el("tr");
+    tr.append(el("td", "vpnwho"), el("td", "mono", p.routes.join(", ")), el("td", "num", String(p.peers)), chevCell("prof", p.name, renderProfiles));
+    tr.firstChild.appendChild(el("strong", "", p.name));
     tb.appendChild(tr);
+    if (isOpen("prof", p.name)) {
+      const info = el("div");
+      if (p.description) info.appendChild(el("div", "", p.description));
+      info.append(el("div", "meta", `DNS: ${p.dns.join(", ") || "device's own"} · ${p.ipv6 ? "IPv6 on" : "IPv6 off"}`));
+      if ((p.allow || []).length) info.append(el("div", "meta mono", "Allowed only: " + p.allow.join(", ")));
+      const row = el("div", "userrow-actions"), edit = el("button", "btn sm", "Edit"), del = el("button", "btn sm danger", "Delete");
+      edit.type = del.type = "button";
+      edit.onclick = () => profileForm(p);
+      del.disabled = p.peers > 0 || PROFILES.length < 2;
+      del.title = p.peers ? "In use: move its devices to another profile first" : "";
+      del.onclick = async () => {
+        const typed = prompt(`Delete profile ${p.name}? Type the name to confirm.`);
+        if (typed === null) return;
+        try { await api(`api/profiles/${encodeURIComponent(p.name)}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" }); }
+        catch (x) { alert(x.message); }
+        loadPeers();
+      };
+      row.append(edit, del);
+      tb.appendChild(subRow(4, info, row));
+    }
+    t.appendChild(tb);
   }
-  t.appendChild(tb);
   wrap.appendChild(t);
-  box.replaceChildren(wrap, nav);
+  box.replaceChildren(openAllBar("prof", rows.map((p) => p.name), renderProfiles), wrap, nav);
 }
 
 // Schedules (api/schedules, map vpn-totp-schedules): table + form; times are vpn1's local wall clock.
@@ -675,38 +722,42 @@ function renderSchedules() {
   const found = matching(SCHEDULES, "vpnscq", (s) => [s.name, s.description, s.weekly, s.dates, s.starts, s.expires].join(" "));
   if (!found.length) { box.replaceChildren(el("div", "nodata", "No schedule matches the filter.")); return; }
   const [rows, nav] = paged("schedules", found, renderSchedules);
-  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
-  t.innerHTML = "<thead><tr><th>Schedule</th><th>When</th><th>Now</th><th>Devices</th><th></th></tr></thead>";
+  const wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
+  t.innerHTML = "<thead><tr><th>Schedule</th><th>Now</th><th>Devices</th><th></th></tr></thead>";
   for (const s of rows) {
-    const tr = el("tr"), who = el("td", "vpnwho"), when = el("td", "mono"), now = el("td"), acts = el("td"), row = el("div", "userrow-actions");
-    who.append(el("strong", "", s.name), el("div", "meta", s.description));
-    for (const line of [...s.weekly.split("\n"), ...s.dates.split("\n")].filter(Boolean)) when.appendChild(el("div", "", line));
-    if (!s.weekly && !s.dates) when.appendChild(el("div", "", "whole valid period"));
-    if (s.starts || s.expires) when.appendChild(el("div", "meta", [s.starts && `from ${s.starts}`, s.expires && `expires after ${s.expires}`].filter(Boolean).join(", ")));
+    const tb = el("tbody", "vpnitem"), tr = el("tr"), now = el("td");
     now.append(el("span", "pill " + (s.on ? "ok" : "nodot"), s.on ? "on" : "off"));
-    if (s.next) now.append(el("div", "meta", `${s.on ? "off" : "on"} at ${wall(s.next)}`));
-    const edit = el("button", "btn sm", "Edit"), del = el("button", "btn sm danger", "Delete");
-    edit.type = del.type = "button";
-    edit.onclick = () => scheduleForm(s);
-    edit.disabled = !!s.locked;
-    edit.title = s.locked || "";
-    del.disabled = s.devices > 0 || !!s.locked || s.sign_in;
-    del.title = s.locked || (s.devices ? "In use: set its devices to another schedule first" : s.sign_in ? "Sets an account's sign-in hours (Users)" : "");
-    del.onclick = async () => {
-      const typed = prompt(`Delete schedule ${s.name}? Type the name to confirm.`);
-      if (typed === null) return;
-      try { await api(`api/schedules/${encodeURIComponent(s.name)}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" }); }
-      catch (x) { alert(x.message); }
-      loadPeers();
-    };
-    row.append(edit, del);
-    acts.appendChild(row);
-    tr.append(who, when, now, el("td", "num", String(s.devices)), acts);
+    if (s.next) now.append(" ", el("span", "meta", `${s.on ? "off" : "on"} at ${wall(s.next)}`));
+    tr.append(el("td", "vpnwho"), now, el("td", "num", String(s.devices)), chevCell("sched", s.name, renderSchedules));
+    tr.firstChild.appendChild(el("strong", "", s.name));
     tb.appendChild(tr);
+    if (isOpen("sched", s.name)) {
+      const when = el("div", "mono");
+      if (s.description) when.appendChild(el("div", "", s.description));
+      for (const line of [...s.weekly.split("\n"), ...s.dates.split("\n")].filter(Boolean)) when.appendChild(el("div", "", line));
+      if (!s.weekly && !s.dates) when.appendChild(el("div", "", "whole valid period"));
+      if (s.starts || s.expires) when.appendChild(el("div", "meta", [s.starts && `from ${s.starts}`, s.expires && `expires after ${s.expires}`].filter(Boolean).join(", ")));
+      const row = el("div", "userrow-actions"), edit = el("button", "btn sm", "Edit"), del = el("button", "btn sm danger", "Delete");
+      edit.type = del.type = "button";
+      edit.onclick = () => scheduleForm(s);
+      edit.disabled = !!s.locked;
+      edit.title = s.locked || "";
+      del.disabled = s.devices > 0 || !!s.locked || s.sign_in;
+      del.title = s.locked || (s.devices ? "In use: set its devices to another schedule first" : s.sign_in ? "Sets an account's sign-in hours (Users)" : "");
+      del.onclick = async () => {
+        const typed = prompt(`Delete schedule ${s.name}? Type the name to confirm.`);
+        if (typed === null) return;
+        try { await api(`api/schedules/${encodeURIComponent(s.name)}?confirm=${encodeURIComponent(typed.trim())}`, { method: "DELETE" }); }
+        catch (x) { alert(x.message); }
+        loadPeers();
+      };
+      row.append(edit, del);
+      tb.appendChild(subRow(4, when, row));
+    }
+    t.appendChild(tb);
   }
-  t.appendChild(tb);
   wrap.appendChild(t);
-  box.replaceChildren(wrap, nav);
+  box.replaceChildren(openAllBar("sched", rows.map((s) => s.name), renderSchedules), wrap, nav);
 }
 
 // Last api/state answer: filter and page clicks re-render from it without a new request.
@@ -743,7 +794,6 @@ function renderPeers() {
   const untagged = d.peers.filter((p) => !p.tags.length).length;
   if (tagFilter && !counts[tagFilter] && !(tagFilter === "-" && untagged)) tagFilter = "";
   const chips = el("div", "ovfilter");
-  chips.style.marginBottom = "var(--s2)";
   const tagKeys = Object.keys(counts).sort();
   if (tagKeys.length) {
     for (const [tag, n, label] of [["", d.peers.length, "all"], ...tagKeys.map((g) => [g, counts[g], g]), ...(untagged ? [["-", untagged, "untagged"]] : [])]) {
@@ -781,57 +831,54 @@ function renderPeers() {
     mailBtn.textContent = `Email owners (${PICKED.size})`; mailBtn.disabled = !PICKED.size; setBtn.textContent = `Bulk edit (${PICKED.size})`; bulkCount();
   };
   count();
-  bar.append(mailBtn, setBtn);
+  // Expand all / Collapse all for the rows on screen, at the bar's right end (owner 2026-11-02)
+  const openBtn = openAllBtn("dev", rows.map((p) => p.name), renderPeers);
+  bar.append(mailBtn, setBtn, openBtn);
+  // Status only on request: no timer re-renders the list under the admin (owner 2026-11-02). Right above the table,
+  // on the tag filter's line.
+  const refresh = el("button", "btn sm", "Refresh"), above = el("div", "vpnabove");
+  refresh.type = "button";
+  refresh.title = "Reload device status (open rows and ticks stay)";
+  refresh.onclick = () => { refresh.disabled = true; loadPeers(); };
+  above.append(chips, refresh);
   renderBulk();
-  if (!shown.length) { box.replaceChildren(chips, el("div", "nodata", "No device matches the filter.")); return; }
-  const wrap = el("div", "tablewrap"), t = el("table");
-  t.innerHTML = "<thead><tr><th></th><th>Device</th><th>Profile</th><th>Last handshake</th><th></th></tr></thead>";
+  if (!shown.length) { box.replaceChildren(above, el("div", "nodata", "No device matches the filter.")); return; }
+  // One tbody per device (owner 2026-11-02): row 1 tick, name, address, profile, on/off, status, expand; row 2 the
+  // grouping (group, schedule, tags, owner); expanded: pickers in row 2, traffic and actions in row 3.
+  const wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
+  t.innerHTML = "<thead><tr><th></th><th>Device</th><th>IP</th><th>Profile</th><th>On</th><th>Status</th><th></th></tr></thead>";
   t.querySelector("th").appendChild(all);
-  const tb = el("tbody"), now = Date.now() / 1000;
+  const now = Date.now() / 1000, allTags = [...new Set(d.peers.flatMap((p) => p.tags))].sort();
   for (const p of rows) {
-    const tr = el("tr"), tick = el("td"), cb = el("input"), who = el("td"), prof = el("td"), seen = el("td");
+    const tb = el("tbody", "vpnitem"), tr = el("tr"), tick = el("td"), cb = el("input"), prof = el("td"), seen = el("td");
+    const open = isOpen("dev", p.name);
     cb.type = "checkbox";
     cb.checked = PICKED.has(p.name);
     cb.setAttribute("aria-label", `Tick ${p.name}`);
     cb.onchange = () => { cb.checked ? PICKED.add(p.name) : PICKED.delete(p.name); count(); };
     tick.appendChild(cb);
-    tr.appendChild(tick);
-    who.append(el("strong", "", p.name), el("div", "meta mono", p.address));
-    if (p.email) who.appendChild(el("div", "meta", p.email));
-    if (p.tags.length) {
-      const tg = el("div");
-      for (const g of p.tags) tg.appendChild(el("span", "pill nodot info", g));
-      who.appendChild(tg);
-    }
-    const ps = el("select", "input vpnsel");
-    ps.setAttribute("aria-label", `Profile of ${p.name}`);
+    const who = el("td"), addr = el("td", "mono", p.address);
+    who.appendChild(el("strong", "", p.name));
     // a group admin picks only what an admin linked to the device's group
     const g = groupOf(p.group), mayP = (n) => isAdmin() || g.profiles.includes(n), mayS = (n) => isAdmin() || g.schedules.includes(n);
-    for (const name of new Set([p.profile, ...PROFILES.map((x) => x.name).filter(mayP)])) { const o = el("option", "", name); o.value = name; ps.appendChild(o); }
-    ps.value = p.profile;
-    ps.title = profDesc(p.profile);
-    ps.onchange = () => act(p, "profile", ps.value);
-    prof.appendChild(ps);
-    if (GROUPS.length > (isAdmin() ? 0 : 1)) {
-      const gs = el("select", "input vpnsel vpnschedsel");
-      gs.setAttribute("aria-label", `Group of ${p.name}`);
-      for (const [v, label] of [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((x) => [x.name, "group: " + x.name])]) {
-        const o = el("option", "", label); o.value = v; gs.appendChild(o);
-      }
-      gs.value = p.group || "";
-      gs.onchange = () => act(p, "group", gs.value);
-      prof.appendChild(gs);
-    }
-    if (SCHEDULES.length || p.schedule) {
-      const ss = el("select", "input vpnsel vpnschedsel");
-      ss.setAttribute("aria-label", `Schedule of ${p.name}`);
-      for (const [v, label] of [["", "no schedule"], ...SCHEDULES.filter((s) => mayS(s.name) || s.name === p.schedule).map((s) => [s.name, "schedule: " + s.name])]) {
-        const o = el("option", "", label); o.value = v; ss.appendChild(o);
-      }
-      ss.value = p.schedule || "";
-      ss.onchange = () => act(p, "schedule", ss.value);
-      prof.appendChild(ss);
-    }
+    if (open) {
+      const ps = el("select", "input vpnsel");
+      ps.setAttribute("aria-label", `Profile of ${p.name}`);
+      for (const name of new Set([p.profile, ...PROFILES.map((x) => x.name).filter(mayP)])) { const o = el("option", "", name); o.value = name; ps.appendChild(o); }
+      ps.value = p.profile;
+      ps.title = profDesc(p.profile);
+      ps.onchange = () => act(p, "profile", ps.value);
+      prof.appendChild(ps);
+    } else prof.textContent = p.profile;
+    // slider: green on, grey off (owner 2026-10-27)
+    const on = el("td"), tg = el("button", "vpnswitch");
+    tg.type = "button";
+    tg.setAttribute("role", "switch");
+    tg.setAttribute("aria-checked", String(p.enabled));
+    tg.setAttribute("aria-label", `VPN access for ${p.name}`);
+    tg.title = p.enabled ? "VPN access on: click to turn it off (setup kept)" : "VPN access off: click to turn it on";
+    tg.onclick = () => act(p, "enabled");
+    on.appendChild(tg);
     const fresh = p.handshake && now - p.handshake < 180;  // WireGuard re-handshakes every 2 min while in use
     if (!p.enabled) seen.append(el("span", "pill warn", p.schedule && !p.hold ? "off by schedule" : "disabled"), " ");
     if (p.hold) {
@@ -845,37 +892,97 @@ function renderPeers() {
       ri.title = "Its config changed: show the QR or download the package for the device";
       seen.append(" ", ri);
     }
-    // traffic and created as meta lines, not columns: the table fits beside the info box (owner 2026-10-27)
-    seen.appendChild(el("div", "meta", `in / out ${bytes(p.tx)} / ${bytes(p.rx)}`));
-    who.appendChild(el("div", "meta", "added " + whenAt(p.created)));
-    tr.append(who, prof, seen);
-    const acts = el("td"), row = el("div", "userrow-actions");
-    const btn = (label, fn, cls) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; row.appendChild(b); };
-    // slider: green on, grey off (owner 2026-10-27)
-    const tg = el("button", "vpnswitch");
-    tg.type = "button";
-    tg.setAttribute("role", "switch");
-    tg.setAttribute("aria-checked", String(p.enabled));
-    tg.setAttribute("aria-label", `VPN access for ${p.name}`);
-    tg.title = p.enabled ? "VPN access on: click to turn it off (setup kept)" : "VPN access off: click to turn it on";
-    tg.onclick = () => act(p, "enabled");
-    row.appendChild(tg);
-    btn("QR", () => showQr(p.name));
-    const conf = el("a", "btn sm", ".conf");
-    conf.href = BASE + peerPath(p.name) + "/conf";
-    row.appendChild(conf);
-    btn("Tags", () => act(p, "tags"));
-    btn("Owner", () => act(p, "email"));
-    if (p.email) btn("Notify", () => notify([p.name]));
-    if (isAdmin()) btn("Log", () => openLog(p.name));
-    btn("Revoke", () => act(p, "remove"), "danger");
-    acts.appendChild(row);
-    tr.appendChild(acts);
+    const ex = chevCell("dev", p.name, renderPeers);
+    tr.append(tick, who, addr, prof, on, seen, ex);
     tb.appendChild(tr);
+    // row 2: the grouping, as pills (collapsed) or pickers (expanded)
+    const sub = el("tr", "vpnsub"), cell = el("td"), line = el("div", "vpngrp");
+    cell.colSpan = 6;
+    sub.append(el("td"), cell);
+    if (open) {
+      if (GROUPS.length > (isAdmin() ? 0 : 1)) {
+        const gs = el("select", "input vpnsel");
+        gs.setAttribute("aria-label", `Group of ${p.name}`);
+        for (const [v, label] of [...(isAdmin() ? [["", "no group"]] : []), ...GROUPS.map((x) => [x.name, "group: " + x.name])]) {
+          const o = el("option", "", label); o.value = v; gs.appendChild(o);
+        }
+        gs.value = p.group || "";
+        gs.onchange = () => act(p, "group", gs.value);
+        line.appendChild(gs);
+      }
+      if (SCHEDULES.length || p.schedule) {
+        const ss = el("select", "input vpnsel");
+        ss.setAttribute("aria-label", `Schedule of ${p.name}`);
+        for (const [v, label] of [["", "no schedule"], ...SCHEDULES.filter((s) => mayS(s.name) || s.name === p.schedule).map((s) => [s.name, "schedule: " + s.name])]) {
+          const o = el("option", "", label); o.value = v; ss.appendChild(o);
+        }
+        ss.value = p.schedule || "";
+        ss.onchange = () => act(p, "schedule", ss.value);
+        line.appendChild(ss);
+      }
+      line.appendChild(tagPicker(p, allTags));
+    } else {
+      if (p.group) line.appendChild(el("span", "pill nodot", "group: " + p.group));
+      if (p.schedule) line.appendChild(el("span", "pill nodot", "schedule: " + p.schedule));
+      for (const x of p.tags) line.appendChild(el("span", "pill nodot info", x));
+    }
+    if (p.email) line.appendChild(el("span", "meta", p.email));
+    cell.appendChild(line);
+    if (line.childNodes.length) tb.appendChild(sub);
+    if (open) {
+      // row 3: traffic, created and the actions
+      const more = el("tr", "vpnsub"), mc = el("td"), row = el("div", "userrow-actions");
+      mc.colSpan = 6;
+      more.append(el("td"), mc);
+      mc.appendChild(el("div", "meta", `in / out ${bytes(p.tx)} / ${bytes(p.rx)} · added ${whenAt(p.created)}`));
+      const btn = (label, fn, cls) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; row.appendChild(b); };
+      btn("QR", () => showQr(p.name));
+      const conf = el("a", "btn sm", ".conf");
+      conf.href = BASE + peerPath(p.name) + "/conf";
+      row.appendChild(conf);
+      btn("Owner", () => act(p, "email"));
+      if (p.email) btn("Notify", () => notify([p.name]));
+      btn("Log", () => openLog(p.name));
+      btn("Revoke", () => act(p, "remove"), "danger");
+      mc.appendChild(row);
+      tb.appendChild(more);
+    }
+    t.appendChild(tb);
   }
-  t.appendChild(tb);
   wrap.appendChild(t);
-  box.replaceChildren(chips, wrap, nav);
+  box.replaceChildren(above, wrap, nav);
+}
+
+// Tags of one device as a dropdown with a tick per known tag and a box for new ones (owner 2026-11-02); Save sends
+// the whole list (api/peers/NAME/tags, max 8).
+function tagPicker(p, allTags) {
+  const dd = el("details", "vpntagpick"), sum = el("summary", "btn sm", `Tags (${p.tags.length})`), menu = el("div", "vpntagmenu");
+  sum.setAttribute("aria-label", `Tags of ${p.name}`);
+  const boxes = allTags.map((x) => {
+    const lb = el("label"), c = el("input");
+    c.type = "checkbox";
+    c.value = x;
+    c.checked = p.tags.includes(x);
+    lb.append(c, " " + x);
+    menu.appendChild(lb);
+    return c;
+  });
+  const add = el("input", "input");
+  add.placeholder = "new tags, comma-separated";
+  add.setAttribute("aria-label", `New tags for ${p.name}`);
+  const save = el("button", "btn sm primary", "Save tags");
+  save.type = "button";
+  save.onclick = async () => {
+    const tags = [...new Set([...boxes.filter((c) => c.checked).map((c) => c.value), ...tagList(add.value)])];
+    if (tags.length > 8) { alert(`Up to 8 tags per device (${tags.length} picked).`); return; }
+    try {
+      await api(peerPath(p.name) + "/tags", { method: "POST", body: JSON.stringify({ tags }) });
+    } catch (x) { alert(x.message); }
+    loadPeers();
+  };
+  menu.append(add, save);
+  dd.append(sum, menu);
+  return dd;
 }
 
 // Bulk edit (api/peers/apply, map wg-admin-bulk): tick the settings to change, set their values, apply all of them
@@ -1147,6 +1254,7 @@ function renderServer(settings) {
   t.appendChild(tb);
   wrap.appendChild(t);
   box.replaceChildren(wrap);
+  secSum("Server", "Endpoint " + (SERVER.endpoint || "not set"));
 }
 // Network (api/network): current mode as rows; the form shows transit and gateway only where they apply.
 let NET = {};
@@ -1211,6 +1319,7 @@ function renderNetwork(d) {
   t.appendChild(tb);
   wrap.appendChild(t);
   $("vpnnbox").replaceChildren(wrap);
+  secSum("Network", rows[0][1]);
 }
 function toggleRules() {
   const pre = $("vpnrulesbox"), open = pre.hidden;
@@ -1251,7 +1360,7 @@ function parseRuleset(text) {
 const EVERY = /^(IPv6 )?(0\.0\.0\.0\/0|::\/0)$/;
 function renderFirewall(text) {
   const box = $("vpnfwbox"), rows = parseRuleset(text);
-  if (!rows.length) { box.replaceChildren(el("div", "nodata", "No profile rules found in the server's ruleset.")); return; }
+  if (!rows.length) { box.replaceChildren(el("div", "nodata", "No profile rules found in the server's ruleset.")); secSum("Firewall", "no profile rules found"); return; }
   const byIp = {};
   for (const p of (LAST && LAST.peers) || []) for (const a of String(p.address).split(/[\s,]+/)) byIp[a.split("/")[0]] = p.name;
   const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
@@ -1301,6 +1410,7 @@ function renderFirewall(text) {
                      ? "IPv4 is routed: logs show each device's own tunnel address. IPv6 leaves with the server's address (NAT)."
                      : "Traffic leaves the server with the server's LAN address (NAT)."]) always.append(el("li", "", s));
   box.replaceChildren(wrap, el("p", "meta", "For every device:"), always);
+  secSum("Firewall", `${rows.length} connection profile${rows.length === 1 ? "" : "s"} in the live rules`);
 }
 // Rule editor (owner 2026-10-27: edit the firewall on the Server view): one row per allowed destination, saved as
 // the profile's allow list through api/profiles; vpn-peer checks it and reloads the firewall, no re-import.
@@ -1377,6 +1487,7 @@ function renderMail(m) {
   wrap.appendChild(t);
   $("vpnmbox").replaceChildren(wrap);
   $("vpnmtest").disabled = !m.ready;
+  secSum("Mail", m.host ? `${m.from_addr || "no sender"} via ${m.host}:${m.port}` : "not set");
 }
 async function loadMail() {
   try { renderMail(await api("api/mail")); } catch (x) { $("vpnmbox").replaceChildren(el("div", "nodata", x.message)); }
@@ -1418,6 +1529,7 @@ function renderLogging(g) {
   t.appendChild(tb);
   wrap.appendChild(t);
   $("vpnlgbox").replaceChildren(wrap);
+  secSum("Logging", `${g.days} days local; syslog ${g.host ? `${g.host}:${g.port}` : "none"}`);
 }
 async function loadLogging() {
   try { renderLogging(await api("api/logging")); } catch (x) { $("vpnlgbox").replaceChildren(el("div", "nodata", x.message)); }
@@ -1460,15 +1572,19 @@ let logTimer = 0;
 async function loadLog() {
   const q = new URLSearchParams({ hours: $("vpnlhours").value, kind: $("vpnlkind").value, q: $("vpnlq").value.trim(), limit: "1000" });
   $("vpnlmsg").textContent = "Loading…";
-  try { renderLog(await api("api/log?" + q)); }
+  try { PAGES.log = 0; renderLog(await api("api/log?" + q)); }
   catch (x) { $("vpnlmsg").textContent = ""; $("vpnlbox").replaceChildren(el("div", "nodata", x.message)); }
 }
-function renderLog(d) {
+let LOGDATA = null;
+function renderLog(d = LOGDATA) {
+  LOGDATA = d;
   $("vpnlmsg").textContent = d.total > d.rows.length ? `newest ${d.rows.length} of ${d.total}` : `${d.total} lines`;
   if (!d.rows.length) { $("vpnlbox").replaceChildren(el("div", "nodata", "Nothing in this period for this search.")); return; }
   const wrap = el("div", "tablewrap"), t = el("table", "vpnlog"), tb = el("tbody");
   t.innerHTML = "<thead><tr><th>Time</th><th>Device</th><th>Kind</th><th>Event</th></tr></thead>";
-  for (const r of d.rows) {
+  // rows per page as on Devices (owner 2026-11-02); the API sends the newest 1000 at most
+  const [rows, nav] = paged("log", d.rows, () => renderLog());
+  for (const r of rows) {
     const tr = el("tr"), dev = el("td"), kind = el("td");
     if (r.peer) {
       const a = el("button", "btn sm ghost", r.peer);
@@ -1483,7 +1599,7 @@ function renderLog(d) {
   }
   t.appendChild(tb);
   wrap.appendChild(t);
-  $("vpnlbox").replaceChildren(wrap);
+  $("vpnlbox").replaceChildren(wrap, nav);
 }
 function openLog(name) {
   $("vpnlq").value = name;
@@ -1534,26 +1650,30 @@ async function loadGroups() {
 }
 function renderGroups() {
   if (!GROUPLIST.length) { $("vpngbox").replaceChildren(el("div", "nodata", "No groups: every device is managed by admins only.")); return; }
-  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
-  t.innerHTML = "<thead><tr><th>Group</th><th>Profiles</th><th>Schedules</th><th>Devices</th><th>Group admins</th><th></th></tr></thead>";
+  const wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
+  t.innerHTML = "<thead><tr><th>Group</th><th>Devices</th><th>Group admins</th><th></th></tr></thead>";
   for (const g of GROUPLIST) {
-    const tr = el("tr"), who = el("td", "vpnwho"), acts = el("td"), row = el("div", "userrow-actions");
-    who.append(el("strong", "", g.name), el("div", "meta", g.description));
-    const edit = el("button", "btn sm", "Edit"), rm = el("button", "btn sm danger", "Delete");
-    edit.type = rm.type = "button";
-    edit.onclick = () => groupForm(g);
-    rm.disabled = g.devices > 0 || g.admins.length > 0;
-    rm.title = rm.disabled ? "In use: move its devices and group admins first" : "";
-    rm.onclick = () => del("api/groups", "group", g.name, () => { loadGroups(); loadPeers(); });
-    row.append(edit, rm);
-    acts.appendChild(row);
-    tr.append(who, el("td", "mono", g.profiles.join(", ") || "-"), el("td", "mono", g.schedules.join(", ") || "-"),
-              el("td", "num", String(g.devices)), el("td", "", g.admins.join(", ") || "-"), acts);
+    const tb = el("tbody", "vpnitem"), tr = el("tr");
+    tr.append(el("td", "vpnwho"), el("td", "num", String(g.devices)), el("td", "", g.admins.join(", ") || "-"), chevCell("group", g.name, renderGroups));
+    tr.firstChild.appendChild(el("strong", "", g.name));
     tb.appendChild(tr);
+    if (isOpen("group", g.name)) {
+      const info = el("div");
+      if (g.description) info.appendChild(el("div", "", g.description));
+      info.append(el("div", "meta", "Profiles: " + (g.profiles.join(", ") || "-")), el("div", "meta", "Schedules: " + (g.schedules.join(", ") || "-")));
+      const row = el("div", "userrow-actions"), edit = el("button", "btn sm", "Edit"), rm = el("button", "btn sm danger", "Delete");
+      edit.type = rm.type = "button";
+      edit.onclick = () => groupForm(g);
+      rm.disabled = g.devices > 0 || g.admins.length > 0;
+      rm.title = rm.disabled ? "In use: move its devices and group admins first" : "";
+      rm.onclick = () => del("api/groups", "group", g.name, () => { loadGroups(); loadPeers(); });
+      row.append(edit, rm);
+      tb.appendChild(subRow(4, info, row));
+    }
+    t.appendChild(tb);
   }
-  t.appendChild(tb);
   wrap.appendChild(t);
-  $("vpngbox").replaceChildren(wrap);
+  $("vpngbox").replaceChildren(openAllBar("group", GROUPLIST.map((g) => g.name), renderGroups), wrap);
 }
 function groupForm(g) {
   $("vpngformh").textContent = g ? `Edit group ${g.name}` : "Add a group";
@@ -1586,38 +1706,42 @@ async function loadUsers() {
   try { renderUsers(await api("api/users")); } catch (x) { $("vpnubox").replaceChildren(el("div", "nodata", x.message)); }
 }
 function renderUsers(d) {
-  USERS = d.users;
-  $("vpnpoladmin").checked = d.totp_roles.includes("admin");
-  $("vpnpolgroup").checked = d.totp_roles.includes("group-admin");
-  $("vpnpolhist").value = d.pw_history;
-  const wrap = el("div", "tablewrap"), t = el("table"), tb = el("tbody");
-  t.innerHTML = "<thead><tr><th>User</th><th>Role</th><th>Sign-in</th><th>State</th><th></th></tr></thead>";
+  if (d) {
+    USERS = d.users;
+    $("vpnpoladmin").checked = d.totp_roles.includes("admin");
+    $("vpnpolgroup").checked = d.totp_roles.includes("group-admin");
+    $("vpnpolhist").value = d.pw_history;
+  }
+  const wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
+  t.innerHTML = "<thead><tr><th>User</th><th>Role</th><th>State</th><th></th></tr></thead>";
+  const again = () => renderUsers();
   for (const u of USERS) {
-    const tr = el("tr"), who = el("td", "vpnwho"), acts = el("td"), row = el("div", "userrow-actions");
+    const tb = el("tbody", "vpnitem"), tr = el("tr"), who = el("td", "vpnwho"), state = el("td");
     who.append(el("strong", "", u.name));
     if (u.default) who.append(" ", el("span", "pill nodot info", "default admin"));
     if (u.you) who.append(" ", el("span", "pill nodot", "you"));
-    const role = el("td", "", u.role === "admin" ? "admin" : "group admin");
-    if (u.groups.length) role.appendChild(el("div", "meta", u.groups.join(", ")));
-    const when = el("td", "", u.schedule || "any time");
-    if (u.expires) when.appendChild(el("div", "meta", `expires after ${u.expires}`));
-    const state = el("td");
-    state.append(el("span", "pill " + (u.state === "active" ? "ok" : "warn"), u.state), " ",
-                 el("span", "pill nodot", u.totp ? "2-step on" : "2-step off"));
+    state.append(el("span", "pill " + (u.state === "active" ? "ok" : "warn"), u.state));
     if (u.fails) state.append(" ", el("span", "pill " + (u.locked ? "crit" : "warn"), u.locked ? "locked out" : `${u.fails} failed`));
-    const btn = (label, fn, cls, off) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; b.disabled = !!off; row.appendChild(b); };
-    btn("Edit", () => userForm(u));
-    btn("Password", () => userPassword(u));
-    btn("Reset 2-step", () => userAction(u, "totp-reset", `Remove ${u.name}'s authenticator? They sign in with the password and set it up again.`), "", !u.totp);
-    btn("Reset lockout", () => userAction(u, "unlock", `Reset ${u.name}'s failed sign-ins (${u.fails})? Blocked addresses can try again at once.`), "", !u.fails);
-    btn("Delete", () => del("api/users", "user", u.name, loadUsers), "danger", u.default || u.you);
-    acts.appendChild(row);
-    tr.append(who, role, when, state, acts);
+    tr.append(who, el("td", "", u.role === "admin" ? "admin" : "group admin"), state, chevCell("user", u.name, again));
     tb.appendChild(tr);
+    if (isOpen("user", u.name)) {
+      const info = el("div");
+      if (u.groups.length) info.appendChild(el("div", "meta", "Groups: " + u.groups.join(", ")));
+      info.append(el("div", "meta", "Sign-in: " + (u.schedule || "any time") + (u.expires ? `, expires after ${u.expires}` : "") +
+                      " · " + (u.totp ? "2-step on" : "2-step off")));
+      const row = el("div", "userrow-actions");
+      const btn = (label, fn, cls, off) => { const b = el("button", "btn sm" + (cls ? " " + cls : ""), label); b.type = "button"; b.onclick = fn; b.disabled = !!off; row.appendChild(b); };
+      btn("Edit", () => userForm(u));
+      btn("Password", () => userPassword(u));
+      btn("Reset 2-step", () => userAction(u, "totp-reset", `Remove ${u.name}'s authenticator? They sign in with the password and set it up again.`), "", !u.totp);
+      btn("Reset lockout", () => userAction(u, "unlock", `Reset ${u.name}'s failed sign-ins (${u.fails})? Blocked addresses can try again at once.`), "", !u.fails);
+      btn("Delete", () => del("api/users", "user", u.name, loadUsers), "danger", u.default || u.you);
+      tb.appendChild(subRow(4, info, row));
+    }
+    t.appendChild(tb);
   }
-  t.appendChild(tb);
   wrap.appendChild(t);
-  $("vpnubox").replaceChildren(wrap);
+  $("vpnubox").replaceChildren(openAllBar("user", USERS.map((u) => u.name), again), wrap);
 }
 async function userForm(u) {
   // groups fetched each time: GROUPS is from the page load and missed groups made since (owner 2026-10-29)
@@ -1701,6 +1825,7 @@ export function mount(target, opts = {}) {
   root.innerHTML = MARKUP;
   document.addEventListener("click", (ev) => { if (info && !info.box.contains(ev.target)) closeInfo(); });
   document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeInfo(); });
+  foldSections();
   $("vpnreload").onclick = reload;
   $("vpnhrun").onclick = () => loadHealth(true);
   $("vpnrules").onclick = toggleRules;

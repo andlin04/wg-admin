@@ -8,10 +8,14 @@ WireGuard + nftables + wg-admin (FastAPI web UI and API; nginx TLS on :8443 -> a
 
 ## Features
 - **Devices:** add one or many (CSV), QR code for the phone app, `.conf` or a `.zip` for computers, mail the setup to
-  the owner, on/off switch, tags with filters, last handshake and traffic per device; bulk edit of several settings
-  on the ticked devices in one go; 10/25/50/100/All rows per page.
+  the owner, on/off switch, tags (ticked from a list) with filters, last handshake and traffic per device; bulk edit
+  of several settings on the ticked devices in one go; 10/25/50/100/All rows per page. Rows show name, IP, profile,
+  on/off and status; the arrow at the right opens the rest (Expand all / Collapse all). Status reloads with
+  **Refresh** above the table, never on a timer.
 - **Connection log:** connects, handshakes, roaming, session ends and WireGuard's own messages per device; admins
-  search them in the Log tab. Kept locally with logrotate, optionally forwarded to a syslog server (UDP/TCP).
+  search them in the Log tab. Each device has a hidden id that never changes and tags its lines: a group admin sees
+  only the lines of devices in their groups (their whole history), nothing else. Kept locally with logrotate, optionally forwarded to a syslog server (UDP/TCP).
+- **Lists on every tab** (profiles, schedules, groups, users, server settings) open per row or all at once.
 - **Connection profiles:** split tunnel (home networks only), full tunnel (all traffic), or single hosts and ports.
   Enforced on the server (nftables), not only in the client config.
 - **Schedules:** weekly hours, calendar dates, valid from / until; devices switch on and off by themselves.
@@ -33,7 +37,8 @@ Made-up demo data (no real names, addresses or keys).
 | ![Schedules](docs/schedules.png) Schedules: when devices may connect | ![Server](docs/server.png) Server settings, network mode, firewall |
 | ![Groups](docs/groups.png) Groups: devices, profiles and schedules for group admins | ![Users](docs/users.png) Users: roles, sign-in hours, 2-step, lockout reset |
 | ![Bulk edit](docs/bulk.png) Bulk edit: several settings on the ticked devices in one go | ![Log](docs/log.png) Log: connections, WireGuard handshakes, admin actions |
-| ![Logging](docs/logging.png) Server settings > Logging: days kept, size per day, syslog forward | |
+| ![Logging](docs/logging.png) Server settings > Logging: days kept, size per day, syslog forward | ![Device open](docs/expanded.png) A device opened: pickers, tags as ticks, actions |
+| ![Profiles open](docs/profiles-open.png) Connection profiles, all opened | ![Server open](docs/server-open.png) Server settings, all parts opened |
 
 ## Using it
 1. **Sign in** at `https://HOST:8443/` with the first admin account (install step 3 below).
@@ -56,7 +61,8 @@ Made-up demo data (no real names, addresses or keys).
 6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`), pick it on the device. A manual switch holds until
    the schedule's next change.
 7. **Others manage their own devices (optional):** Groups > add a group with its profiles and schedules, then
-   Users > add a user with the role group admin and tick the group.
+   Users > add a user with the role group admin and tick the group. Group admins also get the Log tab, limited to
+   their groups' devices.
 
 ## Security
 - Passwords: stored as scrypt hashes (N=2^15, r=8, p=1, 16-byte salt per password), never in clear text. Password
@@ -106,7 +112,7 @@ install first; the WireGuard kernel module is part of Debian 12/13's kernel.
 ## Users, groups and roles
 - Roles: **admin** (everything) and **group admin** (devices of one or more groups; adds devices only into them,
   picks profiles and schedules an admin linked to the group, creates schedules for its groups; no Server settings,
-  health, profiles, groups or users). Every route checks this on the server.
+  health, profiles, groups or users; the Log tab shows only its groups' devices). Every route checks this on the server.
 - Users tab (admins): add, role, groups, sign-in schedule, expiry, disable, reset password or authenticator, delete;
   "require an authenticator" per role. The first account is the default admin: it keeps its role and can't be
   disabled, scheduled, expired or deleted. Any role, group, state or password change ends that user's sessions.

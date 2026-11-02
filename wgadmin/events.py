@@ -37,8 +37,9 @@ class Events:
         self.sink = sink
 
     def __call__(self, user: str, action: str, name: str, ok: bool, out: str,
-                 journal: str = "", notify: str = "") -> None:
-        log.info("audit user=%s action=%s name=%s ok=%s out=%s", user, action, name, ok, out[:300])
+                 journal: str = "", notify: str = "", ref: str = "") -> None:
+        # ref: the device's id (vpn-peer ids) for device actions; the Log tab shows group admins only lines with it
+        log.info("audit user=%s action=%s name=%s%s ok=%s out=%s", user, action, name, f" id={ref}" if ref else "", ok, out[:300])
         if self.sink:
             self.sink({"user": user, "action": action, "name": name, "ok": ok, "out": out[:300],
                        "journal": journal[:500], "notify": notify[:500]})

@@ -139,6 +139,9 @@ class BulkIn(BaseModel):
     lines: str = Field(min_length=1, max_length=10000)
 
 
+# Audit actions on one device: their journal line carries the device's id (Log tab for group admins, 2026-11-02)
+DEVICE_ACTIONS = {"add", "conf", "email", "enable", "disable", "group-set", "package", "profile", "qr", "remove",
+                  "schedule-set", "schedule-on", "schedule-off", "tags"}
 BULK_ORDER = ("profile", "group", "schedule", "tags", "tags-add", "tags-remove", "email", "enabled")
 
 
@@ -234,7 +237,20 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     quiet = threading.local()  # bulk apply: per-device events keep their journal line, one summary goes to Slack
 
     def audit(user: str, action: str, name: str, ok: bool, out: str, journal: str = "", notify: str = "") -> None:
-        events(user, action, name, ok, out, journal, "" if getattr(quiet, "on", False) else notify)
+        ref = device_id(name) if action in DEVICE_ACTIONS else ""
+        if action in ("add", "remove"):
+            ids.pop(name, None)  # a new device under the same name gets a new id
+        events(user, action, name, ok, out, journal, "" if getattr(quiet, "on", False) else notify, ref)
+
+    ids: dict[str, str] = {}  # device name -> id (vpn-peer dump), for the audit lines
+
+    def device_id(name: str) -> str:
+        if name not in ids:
+            try:
+                ids.update({p["name"]: p["id"] for p in vpn.peers(cfg, runner) if p["id"]})
+            except vpn.VpnError:
+                return ""
+        return ids.get(name, "")
 
     sched_lock = threading.Lock()  # the 60 s check runs in a worker thread; the API edits the same file
     edit_lock = threading.Lock()  # users.json and access.json: read, change, write as one step
@@ -491,11 +507,18 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
     @app.get("/api/log")
     def log_get(request: Request, hours: int = 24, q: str = "", kind: str = "", limit: int = 1000) -> dict[str, Any]:
         """Log tab (map wg-admin-log, admins): connection log, kernel WireGuard messages and admin actions of the last
-        1-168 h, newest first. q: words that must all appear (device name or text); kind: conn|wireguard|admin|warn."""
-        admin_of(request)
+        1-168 h, newest first. q: words that must all appear (device name or text); kind: conn|wireguard|admin|warn.
+        A group admin gets only the lines of devices in their groups now, by the device id on the line (whole
+        history, owner 2026-11-02); lines without an id (written before ids) count by name, admin actions never."""
+        w = who(request)
         if not 1 <= hours <= 168:
             raise HTTPException(422, "hours: 1-168")
         rows, words = do(vpn.log, hours), q.lower().split()
+        if not w.admin:
+            members = acl()["members"]
+            mine = [p for p in do(vpn.peers) if members.get(p["name"]) in w.groups]
+            refs, names = {p["id"] for p in mine if p["id"]}, {p["name"] for p in mine}
+            rows = [r for r in rows if (r["id"] in refs if r["id"] else r["kind"] != "admin" and r["peer"] in names)]
         if kind == "warn":
             rows = [r for r in rows if r["warn"]]
         elif kind:
@@ -760,6 +783,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         user = scoped_peer(request, name)[0].name
         if confirm.strip() != name:
             raise HTTPException(400, f'type the peer name "{name}" to confirm')
+        device_id(name)  # cached before it is gone: the "remove" audit line keeps the device's id
         out = do(vpn.remove, name)
         with sched_lock:
             data = schedule.load(cfg.schedules_file)

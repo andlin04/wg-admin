@@ -31,10 +31,13 @@ first=0; [ -f "$STATE" ] || first=1
 [ -f "$CONF" ] || CONF=/dev/null
 out=$(printf '%s\n' "$dump" | awk -v now="$now" -v first="$first" -v newstate="$STATE.new" '
   function h(b) { return b >= 1e9 ? sprintf("%.1fGB", b / 1e9) : b >= 1e6 ? sprintf("%.1fMB", b / 1e6) : sprintf("%.0fkB", b / 1e3) }
-  f == 1 { if ($0 ~ /^# name:/) n = $3; else if ($1 == "PublicKey" && n) { name[$3] = n; n = "" } next }
-  f == 2 { known[$1] = 1; phs[$1] = $2; pep[$1] = $3; pact[$1] = $4; next }
+  # device id ("# id:" in the peer block, vpn-peer ids): the Log tab shows a group admin the lines of its devices
+  f == 1 { if ($0 ~ /^\[Peer\]/) u = ""; else if ($0 ~ /^# name:/) n = $3; else if ($0 ~ /^# id:/) u = $3
+           else if ($1 == "PublicKey" && n) { name[$3] = n; uid[$3] = u; n = "" } next }
+  f == 2 { known[$1] = 1; phs[$1] = $2; pep[$1] = $3; pact[$1] = $4; pid[$1] = $5; next }
   f == 3 && NF == 8 {
     nm = ($1 in name) ? name[$1] : "unknown-" substr($1, 1, 8)
+    id = ($1 in uid) ? uid[$1] : ""
     ep = $3; ip = $4; sub(/,.*/, "", ip); sub(/\/32$/, "", ip); hs = $5 + 0
     act = (hs > 0 && now - hs < 180) ? 1 : 0
     seen[nm] = 1; peers++
@@ -45,16 +48,16 @@ out=$(printf '%s\n' "$dump" | awk -v now="$now" -v first="$first" -v newstate="$
     else if (pact[nm] && !act) ev = "end"
     else if (act && ep != pep[nm]) ev = "roam"
     if (ev != "") {
-      line = "event=" ev " peer=" nm " tunnel=" ip " endpoint=" ep
+      line = "event=" ev " peer=" nm (id != "" ? " id=" id : "") " tunnel=" ip " endpoint=" ep
       if (ev == "roam" && nm in known) line = line " from=" pep[nm]
       line = line " last_handshake=" (hs ? (now - hs) "s_ago" : "never") " rx=" h($6) " tx=" h($7)
       print line
     }
-    print nm, hs, ep, act > newstate
+    print nm, hs, ep, act, id > newstate
   }
   END {
     if (first) print "event=start peers=" peers + 0 " (log begins)"
-    for (nm in known) if (!(nm in seen) && pact[nm]) print "event=removed peer=" nm " endpoint=" pep[nm] " (left wg0 during a session: disabled, schedule or revoked)"
+    for (nm in known) if (!(nm in seen) && pact[nm]) print "event=removed peer=" nm (pid[nm] != "" ? " id=" pid[nm] : "") " endpoint=" pep[nm] " (left wg0 during a session: disabled, schedule or revoked)"
     printf "" > newstate
   }' f=1 "$CONF" f=2 "$([ "$first" = 1 ] && echo /dev/null || echo "$STATE")" f=3 -)
 mv "$STATE.new" "$STATE"

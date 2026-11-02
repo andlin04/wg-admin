@@ -6,6 +6,44 @@
 /* Device bar (ui.js renderPeers): tick-all, mail, "Bulk edit" on one wrapping row */
 #vpndbar { flex-wrap: wrap; align-items: center; }
 #vpndbar .input { width: auto; max-width: 14em; }
+#vpndbar { flex: 1; }
+#vpndbar .vpnopenall { margin-left: auto; }
+/* Line right above the device table: tag filter left, Refresh right */
+.vpnabove { display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s2); }
+.vpnabove .ovfilter { flex: 1; }
+/* Collapsible lists (ui.js chevCell, subRow): one tbody per item; its details rows sit under the main row without a
+   line between them; the arrow at the right end toggles them */
+.vpncoll .vpnitem tr:not(:last-child) td { border-bottom: 0; }
+.vpncoll .vpnitem tr.vpnsub td { padding-top: 0; }
+.vpncoll .vpnitem:not(:last-child) tr:last-child td { border-bottom: 1px solid var(--border); }
+.vpncoll .vpnitem:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+.vpncoll td { vertical-align: middle; }
+.vpncoll td.vpnchevtd { width: 1%; text-align: right; }
+.vpnsub .userrow-actions { margin-top: var(--s2); }
+.vpnopenbar { display: flex; justify-content: flex-end; margin-bottom: var(--s2); }
+/* Server settings parts (ui.js foldSections): collapsed = heading + summary line, arrow at the right */
+.vpnsec > .pagehead { align-items: center; }
+.vpnsec > .pagehead > div:first-child { margin-right: auto; }
+.vpnsec > .pagehead > .vpnrowhead { margin-left: var(--s2); }
+.vpnsec .vpnsecsum { margin-top: 2px; }
+.vpnsec.open .vpnsecsum, .vpnsec:not(.open) .vpnsecbody,
+.vpnsec:not(.open) > .pagehead p, .vpnsec:not(.open) > .pagehead > .userrow-actions { display: none; }
+.vpnsec + .vpnsec > .pagehead { margin-top: var(--s4); }
+.vpnopenbar + .vpnsec > .pagehead { margin-top: 0; }
+.vpngrp { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); }
+.vpngrp .vpnsel { width: auto; }
+.vpntagpick > summary { list-style: none; }
+.vpntagpick > summary::-webkit-details-marker { display: none; }
+.vpntagpick[open] { flex-basis: 100%; }
+.vpntagmenu { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); margin-top: var(--s2);
+  padding: var(--s2); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+.vpntagmenu label { display: inline-flex; align-items: center; gap: 4px; margin: 0; white-space: nowrap; }
+.vpntagmenu .input { width: 16em; max-width: 100%; }
+.vpnrowhead { display: inline-flex; align-items: center; padding: 4px; border: 0; background: none;
+  color: inherit; font: inherit; cursor: pointer; border-radius: var(--r-md); }
+.vpnrowhead:hover { background: var(--surface-3); }
+.vpnrowhead .chev { width: 14px; height: 14px; color: var(--text-faint); transition: transform .15s; }
+.vpnrowhead[aria-expanded="true"] .chev { transform: rotate(90deg); color: var(--text); }
 /* Bulk edit panel (ui.js renderBulk): tick + setting name left, value right; one column on phones */
 .vpnsetbox { margin-bottom: var(--s3); }
 .vpnbrows { display: grid; gap: var(--s2); }

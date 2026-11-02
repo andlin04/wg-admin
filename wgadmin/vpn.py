@@ -164,7 +164,7 @@ def parse_dump(text: str) -> list[dict[str, Any]]:
     peers = []
     for line in text.splitlines():
         f = line.split("\t")
-        if len(f) not in (7, 8, 9, 10, 11) or not NAME.match(f[0]):
+        if len(f) not in (7, 8, 9, 10, 11, 12) or not NAME.match(f[0]):
             continue
         num = [int(x) if x.isdigit() else 0 for x in f[3:7]]
         tags = [t for t in f[7].split(",") if TAG.match(t)] if len(f) >= 8 else []
@@ -172,7 +172,8 @@ def parse_dump(text: str) -> list[dict[str, Any]]:
                       "rx": num[1], "tx": num[2], "created": num[3] or None, "tags": tags,
                       "reimport": len(f) >= 9 and f[8] == "1",
                       "email": f[9] if len(f) >= 10 and EMAIL.match(f[9]) else "",
-                      "enabled": not (len(f) == 11 and f[10] == "1")})
+                      "enabled": not (len(f) >= 11 and f[10] == "1"),
+                      "id": f[11] if len(f) == 12 and UUID.match(f[11]) else ""})
     return peers
 
 
@@ -372,6 +373,8 @@ def ruleset(cfg: Config, runner: Runner | None = None) -> str:
     return call(cfg, "ruleset", runner)
 
 
+UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")  # device id (vpn-peer ids)
+LOG_ID = re.compile(r"\b(?:peer|name)=\S+ id=([0-9a-f-]{36})\b")  # id written next to the device name
 LOG_LINE = re.compile(r"^(\S+) \S+ ([\w.-]+)(?:\[\d+\])?: (.*)$")
 LOG_EP = re.compile(r"\((\d{1,3}(?:\.\d{1,3}){3}:\d+|\[[0-9a-f:]+\]:\d+)\)")  # kernel lines: "(1.2.3.4:5678)"
 LOG_WARN = re.compile(r"Invalid|did not complete|giving up|unallowed|No route|Zeroing|stopped hearing|Dropping|"
@@ -383,20 +386,21 @@ def parse_log(text: str) -> list[dict[str, Any]]:
     kind: conn (wg-connlog.sh), wireguard (kernel), admin (wg-admin audit). The kernel knows peers only by number
     and endpoint: its lines get the device name from a wg-conn line with the same endpoint."""
     rows: list[dict[str, Any]] = []
-    by_ep: dict[str, str] = {}
+    by_ep: dict[str, tuple[str, str]] = {}
     for line in text.splitlines():
         m = LOG_LINE.match(line)
         if not m:
             continue
         when, ident, msg = m.groups()
         when = re.sub(r"\.\d+(?=[+Z-])", "", when)  # rsyslog's microseconds: not every browser parses them
-        peer = ""
+        peer, ref = "", ""
         if ident == "wg-conn":
             kind = "conn"
             p, e = re.search(r"\bpeer=(\S+)", msg), re.search(r"\bendpoint=(\S+)", msg)
             peer = p.group(1) if p else ""
             if peer and e and e.group(1) != "(none)":
-                by_ep[e.group(1)] = peer
+                i = LOG_ID.search(msg)
+                by_ep[e.group(1)] = (peer, i.group(1) if i else "")
         elif ident == "kernel" and "wireguard: " in msg[:40]:
             kind, msg = "wireguard", re.sub(r"^(\[\s*[\d.]+\]\s*)?wireguard: ", "", msg)
         elif msg.startswith("wg-admin INFO audit "):
@@ -405,18 +409,20 @@ def parse_log(text: str) -> list[dict[str, Any]]:
             peer = n.group(1) if n and NAME.match(n.group(1)) else ""
         else:
             continue
-        rows.append({"time": when, "kind": kind, "peer": peer, "warn": bool(LOG_WARN.search(msg)), "text": msg})
-    by_num: dict[str, str] = {}
+        i = LOG_ID.search(msg) if peer else None
+        ref = i.group(1) if i else ""
+        rows.append({"time": when, "kind": kind, "peer": peer, "id": ref, "warn": bool(LOG_WARN.search(msg)), "text": msg})
+    by_num: dict[str, tuple[str, str]] = {}
     for r in rows:  # kernel lines: name by endpoint, then by peer number (lines without an endpoint)
         if r["kind"] != "wireguard":
             continue
         e, n = LOG_EP.search(r["text"]), re.search(r"\b[Pp]eer (\d+)", r["text"])
-        if e and e.group(1) in by_ep:
-            r["peer"] = by_ep[e.group(1)]
+        if e and e.group(1) in by_ep:  # the id comes along with the name
+            r["peer"], r["id"] = by_ep[e.group(1)]
             if n:
-                by_num[n.group(1)] = r["peer"]
+                by_num[n.group(1)] = by_ep[e.group(1)]
         elif n and n.group(1) in by_num:
-            r["peer"] = by_num[n.group(1)]
+            r["peer"], r["id"] = by_num[n.group(1)]
     rows.reverse()
     return rows
 

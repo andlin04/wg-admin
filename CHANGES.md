@@ -2,6 +2,33 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-02: Refresh button for device status
+
+- **Refresh** right above the device table (on the tag filter line, at the right) reloads device status; open rows, ticks and the page stay. Nothing
+  reloads the list on a timer (owner: refreshes mid-work are annoying).
+
+## 2026-11-02: device ids, Log tab for group admins
+
+- Every device gets a hidden id that never changes (`# id:` in its wg0.conf block; `vpn-peer ids` gives existing
+  devices one on install). Connection lines (`wg-conn`) and wg-admin's audit lines for device actions carry it;
+  kernel WireGuard lines get it with the device name.
+- Group admins see the Log tab and the device row's Log button: only lines of devices in their groups now, by id,
+  so a device moved into the group shows its whole history and a re-added device with the same name starts fresh.
+  Lines from before ids count by device name (connections only); unknown devices and other admin actions never show.
+
+## 2026-11-02: collapsible device rows, tags as ticks
+
+- Device columns: tick, device, IP, profile, on/off, status, expand arrow; a second line under each device
+  shows its group, schedule, tags and owner.
+- Device rows start collapsed. The arrow at the right shows the profile, group and schedule pickers, the tags,
+  traffic and the actions (QR, .conf, Owner, Notify, Log, Revoke). "Expand all" / "Collapse all" at the right of
+  the device bar works on the rows on screen.
+- Tags: a dropdown with a tick for every tag in use plus a box for new ones; Save tags sets them (up to 8).
+- Connection profiles, Schedules, Groups and Users collapse the same way: the main row keeps the key facts (name,
+  routes, devices, on/off, admins, role, state); the arrow shows the rest and the buttons. Expand all per tab.
+- Server settings: Server, Network, Firewall, Mail and Logging fold to their heading and a one-line summary.
+- Log: rows per page (10, 25, 50, 100, All) and Previous / Next, as on Devices; a new search starts at page 1.
+
 ## 2026-11-01: profile changes may need a re-imported profile on the client; bulk edit shows which devices
 
 - Only devices whose client config changes (routes, DNS or IPv6) are marked "re-import". Allowed destinations live
