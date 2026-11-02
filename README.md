@@ -20,7 +20,7 @@ A self-hosted WireGuard VPN server with a web UI, installed by one script on one
 - Set up a phone by scanning a QR code in the WireGuard app.
 - Set up a computer with a `.conf` file, or a `.zip` that includes instructions.
 - Mail the setup to the device's owner.
-- Switch a device off and on with a slider; its key stays. **Revoke** removes it for good.
+- Disable and enable a device's VPN access with a slider; its key and setup stay. **Revoke** removes it for good.
 - Tag devices and filter the list by tag.
 - Each row shows name, IP, profile, on/off and status. The arrow on the right opens the rest: last handshake,
   traffic, pickers and actions. **Expand all** and **Collapse all** open or close every row.
@@ -34,12 +34,14 @@ Each configuration is meant for exactly one device.
 
 | Rule | What happens |
 | --- | --- |
-| **Activation deadline** | A new device must connect within its deadline (3 days by default, 1 to 30). Otherwise it is switched off. |
+| **Activation deadline** | A new device must connect within its deadline (3 days by default, 1 to 30). Otherwise its VPN access is disabled. |
 | **Stored config deleted** | After the device's first connection, the server deletes its copy of the config. QR, `.conf` and `.zip` are then gone; a lost config means revoke and add the device again. |
-| **Copied key detection** | If one key is used from two places at the same time, the device's address flips back and forth. When it changes 3 times within 10 minutes and returns to an earlier address (A, B, A), the device is switched off at once. |
+| **Copied key detection** | If one key is used from two places at the same time, the device's address flips back and forth. When it changes 3 times within 10 minutes and returns to an earlier address (A, B, A), the device's VPN access is disabled at once. |
 
-- Owner and admin copy address get a mail for every switch-off, with the addresses and times.
-- A device switched off for a copied key stays off. Schedules don't switch it back on; only an admin can.
+- The device itself is not touched: the server stops accepting its key. Its setup stays, and an admin can enable
+  access again with the device's slider.
+- Owner and admin copy address get a mail each time access is disabled, with the addresses and times.
+- Access disabled for a copied key stays disabled. Schedules don't enable it again; only an admin can.
 - Limit: copied key detection needs both copies connected at the same time. A copy used while the original is
   offline is not detected.
 
@@ -50,7 +52,8 @@ Each configuration is meant for exactly one device.
   - single hosts and ports
 
   The server enforces them with nftables; they are not just client settings.
-- **Schedules:** weekly hours, calendar dates, valid from and until. Devices switch on and off by themselves.
+- **Schedules:** weekly hours, calendar dates, valid from and until. Device access is enabled and disabled by
+  itself.
 
 ### Users and sign-in
 - Two roles: **admin** and **group admin**. Group admins manage only their groups' devices.
@@ -137,7 +140,7 @@ Nothing needs to be installed first; the WireGuard kernel module is part of Debi
    - Phone: install the WireGuard app, tap **QR**, scan it in the app.
    - Computer: download **.conf** (or the `.zip`) and import it in the WireGuard client.
    - **Notify** mails the setup to the owner.
-   - The device must connect before its **activate by** time. Switching a late device back on gives it the
+   - The device must connect before its **activate by** time. Enabling a late device's access again gives it the
      default deadline again.
 5. **Several devices at once:** tick them (the header box ticks every device on screen), then **Bulk edit**.
    - Tick the settings to change: profile, group, schedule, enabled, tags, owner email.
@@ -146,7 +149,7 @@ Nothing needs to be installed first; the WireGuard kernel module is part of Debi
    - Settings marked * may need a re-import; the panel shows which devices.
 6. **Schedules (optional):** add one (e.g. `mon-fri 07:00-18:00`) and pick it on the device.
    - wg-admin checks schedules every minute in the host's local time (`timedatectl set-timezone ...`).
-   - Switching a device by hand holds until the schedule's next change.
+   - Enabling or disabling access by hand holds until the schedule's next change.
 7. **Let others manage their own devices (optional):** create a group under **Groups** with its profiles and
    schedules. Then under **Users**, add a user with the role group admin and tick the group.
 8. **Authenticator (optional):** **Account > Set up authenticator**, scan the QR code, enter a code, and save the 10

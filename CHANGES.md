@@ -7,6 +7,8 @@ Newest first. `install.sh` applies an update in place; settings, keys and device
 - Features grouped by area, a contents line, short bullets and tables (roles, NAT or Route, command line).
 - Added: Prometheus metrics, own password change, mail test button, the copied-key detection limit, `token-revoke`,
   wg-connlog and wg-metrics in the file list.
+- Wording: the deadline, copied-key check, schedules and slider disable or enable a device's VPN access; the device
+  itself is not switched off.
 
 ## 2026-11-02: expand arrows stay put
 
