@@ -23,7 +23,7 @@
 .vpnsub .userrow-actions { margin-top: var(--s2); }
 .vpnopenbar { display: flex; justify-content: flex-end; margin-bottom: var(--s2); }
 /* Server settings parts (ui.js foldSections): collapsed = heading + summary line, arrow at the right */
-/* The arrow keeps its spot when the part opens (owner 2026-11-02): pinned top right, not in the head's flex flow */
+/* The arrow keeps its spot when the part opens: pinned top right, not in the head's flex flow */
 .vpnsec > .pagehead { position: relative; align-items: center; padding-right: 32px; }
 .vpnsec > .pagehead > div:first-child { margin-right: auto; }
 .vpnsec > .pagehead > .vpnrowhead { position: absolute; top: 0; right: 0; }

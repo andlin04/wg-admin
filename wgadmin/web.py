@@ -1,9 +1,9 @@
-"""wg-admin: the WireGuard admin web UI + API on vpn1 (map vpn-standalone, owner go 2026-10-26).
+"""wg-admin: the WireGuard admin web UI + API on vpn1.
 
 Serves at / on 127.0.0.1:8080 behind nginx on :8443 (TLS); an optional portal can show it under a prefix such as
 /vpn/ through its own nginx (prefix stripped).
 Every /api route needs a user (auth.py: portal SSO headers or a local session); the static UI does not.
-Roles (access.py, map wg-admin-groups): admin routes check admin_of(); device routes check the device's group
+Roles (access.py): admin routes check admin_of(); device routes check the device's group
 against a group admin's groups (scoped_peer) on the server, never in the UI only.
 Run: uvicorn --factory wgadmin.web:main_app (systemd unit wg-admin.service).
 """
@@ -129,7 +129,7 @@ class PeerIn(BaseModel):
 
 
 class DeadlineIn(BaseModel):
-    """Activation deadline of new devices (owner 2026-11-02): default days; group_admins: they may pick their own."""
+    """Activation deadline of new devices: default days; group_admins: they may pick their own."""
     days: int = Field(ge=access.DEADLINE_MIN, le=access.DEADLINE_MAX)
     group_admins: bool = False
 
@@ -163,14 +163,14 @@ class ChangeIn(BaseModel):
 
 
 class ApplyIn(BaseModel):
-    """Bulk edit (map wg-admin-bulk): several settings on the ticked devices in one go, applied in BULK_ORDER
+    """Bulk edit: several settings on the ticked devices in one go, applied in BULK_ORDER
     (enabled last, so a device is switched on with its new setup)."""
     names: list[str] = Field(min_length=1, max_length=200)
     changes: list[ChangeIn] = Field(min_length=1, max_length=len(BULK_ORDER))
 
 
 class LoggingIn(BaseModel):
-    """Server settings > Logging (map wg-admin-log): local VPN log kept `days`; host "" = no syslog forward."""
+    """Server settings > Logging: local VPN log kept `days`; host "" = no syslog forward."""
     days: int = Field(30, ge=1, le=365)
     host: str = Field("", max_length=253)
     port: int = Field(514, ge=1, le=65535)
@@ -494,7 +494,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
 
     @app.put("/api/deadline")
     def deadline_put(request: Request, body: DeadlineIn) -> dict[str, Any]:
-        """Activation deadline of new devices and switched-on expired ones (owner 2026-11-02)."""
+        """Activation deadline of new devices and switched-on expired ones."""
         user = admin_of(request)
         with edit_lock:
             acc = acl()
@@ -530,10 +530,10 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
 
     @app.get("/api/log")
     def log_get(request: Request, hours: int = 24, q: str = "", kind: str = "", limit: int = 1000) -> dict[str, Any]:
-        """Log tab (map wg-admin-log, admins): connection log, kernel WireGuard messages and admin actions of the last
+        """Log tab (admins): connection log, kernel WireGuard messages and admin actions of the last
         1-168 h, newest first. q: words that must all appear (device name or text); kind: conn|wireguard|admin|warn.
         A group admin gets only the lines of devices in their groups now, by the device id on the line (whole
-        history, owner 2026-11-02); lines without an id (written before ids) count by name, admin actions never."""
+        history); lines without an id (written before ids) count by name, admin actions never."""
         w = who(request)
         if not 1 <= hours <= 168:
             raise HTTPException(422, "hours: 1-168")
@@ -790,7 +790,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
 
     @app.post("/api/peers/{name}/enabled")
     def peer_enabled(request: Request, name: str, body: EnabledIn) -> dict[str, Any]:
-        """VPN access on/off without touching the setup (owner 2026-10-27); takes effect at once."""
+        """VPN access on/off without touching the setup; takes effect at once."""
         user = scoped_peer(request, name)[0].name
         try:
             out = vpn.set_enabled(cfg, name, body.enabled, runner, acl()["deadline_days"] if body.enabled else None)
@@ -845,7 +845,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                 acc["clones"][name] = {**acc["clones"][name], "off": False, "at": time.time()}
                 access.save(cfg.access_file, acc)
 
-    # ---------------------------------------------------------------- access schedules (map vpn-totp-schedules)
+    # ---------------------------------------------------------------- access schedules
     def schedules_view(data: dict[str, Any], w: Who, acc: dict[str, Any]) -> dict[str, Any]:
         """Schedules this user sees (group admin: those linked to their groups), each with `locked`: why the user
         may not edit it ("" = may) and `groups`: the groups it is linked to."""
@@ -897,7 +897,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                     continue
                 switched.append(f"{name} {verb}")
                 line = f"VPN: {name} switched {verb} by schedule {entry['schedule']}"
-                audit("schedule", "schedule-" + verb, name, True, out, line,  # Slack too (owner 2026-10-27)
+                audit("schedule", "schedule-" + verb, name, True, out, line,  # Slack too
                       f":{'white_check_mark' if want else 'pause_button'}: {line}")
             if json.dumps(data, sort_keys=True) != before:
                 schedule.save(cfg.schedules_file, data)
@@ -920,7 +920,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
                 + (f"; failed: {'; '.join(failed)}" if failed else ""))
 
     def activation(now: float) -> list[str]:
-        """Devices with a deadline (owner 2026-11-02): first handshake -> `activated` (stored config deleted);
+        """Devices with a deadline: first handshake -> `activated` (stored config deleted);
         deadline passed without one -> switched off (reversible), owner and admins mailed."""
         done = []
         for p in vpn.peers(cfg, runner):
@@ -947,7 +947,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         return done
 
     def clone_check() -> list[str]:
-        """Copied key (owner 2026-11-02): the wg-conn lines of the last hour show the endpoint flipping between IPs
+        """Copied key: the wg-conn lines of the last hour show the endpoint flipping between IPs
         (vpn.clones) -> the device is switched off at once (reversible; schedules leave it off) and recorded in
         access.json clones; owner and admin copy address mailed. A manual switch-on clears it (clone_clear)."""
         marks = acl()["clones"]
@@ -1161,7 +1161,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
               f":key: VPN bulk edit by {user}: {summary}")
         return {"done": done, "failed": failed}
 
-    # ---------------------------------------------------------------- groups (map wg-admin-groups): admins only
+    # ---------------------------------------------------------------- groups: admins only
     def groups_view() -> dict[str, Any]:
         acc, accounts = acl(), auth.accounts()
         out = []
@@ -1226,7 +1226,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         return {"output": f"group {name} deleted", **groups_view()}
 
     # ---------------------------------------------------------------- web UI accounts: admins only
-    # Safe user management (owner 2026-10-29): checked here, never only in the UI; sessions end on every change
+    # Safe user management: checked here, never only in the UI; sessions end on every change
     # of role, groups, state or password; one active admin always; the default admin keeps its role and state.
     def users_view(me: Who) -> dict[str, Any]:
         sched, now = schedule.load(cfg.schedules_file)["schedules"], now_local()
@@ -1384,7 +1384,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         audit(user, "policy-set", "", True, out, f"VPN: {out} (set by {user})")
         return {"output": out, **users_view(who(request))}
 
-    # ---------------------------------------------------------------- mail (map vpn-mail): notices only, no keys
+    # ---------------------------------------------------------------- mail: notices only, no keys
     @app.get("/api/mail")
     def mail_get(request: Request) -> dict[str, Any]:
         admin_of(request)
@@ -1438,7 +1438,7 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
         if unknown:
             raise HTTPException(404, f"no VPN peer {unknown[0]!r}")
         by_owner: dict[str, list[str]] = {}
-        # activated devices: no config left to import (owner 2026-11-02)
+        # activated devices: no config left to import
         done = [n for n in dict.fromkeys(body.names) if known[n]["activated"]]
         for n in dict.fromkeys(body.names):
             if known[n]["email"] and n not in done:

@@ -12,18 +12,18 @@
 #   vpn-peer list                 name, profile, address, latest handshake
 #   vpn-peer dump                 tab-separated: name profile address handshake rx tx created tags reimport(0|1) email
 #                                 disabled(0|1) id activate-by activated (epochs, 0 = none)
-#   vpn-peer activated NAME       first handshake seen (wg-admin, owner 2026-11-02): "# activated:" into the block and
+#   vpn-peer activated NAME       first handshake seen (wg-admin): "# activated:" into the block and
 #                                 the stored client config deleted; only devices added with "# activate-by:"
 #   vpn-peer ids                  give every peer block without one a "# id:" line (install.sh): a UUID that never
 #                                 changes; wg-connlog and the audit log tag lines with it (Log tab for group admins)
 #   vpn-peer deadlines            give every peer block without one a "# activate-by:" line, now + ACTIVATE_DAYS
 #                                 (install.sh; devices added before the activation deadline existed)
-#   vpn-peer disable|enable NAME [DAYS]  VPN access off/on, setup kept (owner 2026-10-27): a "# disabled: 1" line in
+#   vpn-peer disable|enable NAME [DAYS]  VPN access off/on, setup kept: a "# disabled: 1" line in
 #                                 the block keeps the peer out of the live wg0 and out of the firewall's peer sets;
 #                                 enable past the activation deadline: DAYS (1-30, default ACTIVATE_DAYS) more
 #   vpn-peer sync                 load wg0.conf minus disabled peers into wg0 (wg-quick@wg0 ExecStartPost at boot)
-#   vpn-peer email NAME ADDR      set the device owner's email ("-" = none; map vpn-mail)
-#   vpn-peer tags NAME TAGS       set a peer's tags (comma-separated, "-" = none; portal filter, owner 2026-10-26)
+#   vpn-peer email NAME ADDR      set the device owner's email ("-" = none)
+#   vpn-peer tags NAME TAGS       set a peer's tags (comma-separated, "-" = none; portal filter)
 #   vpn-peer profiles             tab-separated: name routes dns peers ipv6 allow description
 #   vpn-peer profile-set NAME ROUTES DNS IPV6 ALLOW [DESCRIPTION...]   add or change a profile; ROUTES/DNS
 #                                 comma-separated, DNS "none" = no DNS line, IPV6 on|off, ALLOW "-" or allowed
@@ -45,20 +45,20 @@
 #   vpn-peer firewall             rewrite + load $NFT (setup-vpn1.sh; the verbs above call it too)
 #   vpn-peer check                dry run: generate the ruleset, `nft -c` it, print it; nothing is loaded
 #   vpn-peer export FILE          root on the console only (not in vpn-gate): age-encrypted tar of /etc/wireguard and
-#                                 /etc/wg-admin; age asks for the passphrase (owner 2026-10-26). README.md: restore.
+#                                 /etc/wg-admin; age asks for the passphrase. README.md: restore.
 #   vpn-peer import FILE          restore an export; the current state moves to /etc/<dir>.before-import-TIME
 # Each peer block in wg0.conf carries "# name:", "# profile:" and "# created:" lines; the client private key lives
-# only in the client config (owner 2026-10-26: kept, so the portal can hand out the package again; owner 2026-11-02:
-# deleted at the first handshake). Activation deadline (owner 2026-11-02): add writes "# activate-by:" (now +
+# only in the client config (kept, so the portal can hand out the package again until
+# deleted at the first handshake). Activation deadline: add writes "# activate-by:" (now +
 # ACTIVATE_DAYS); wg-admin switches a device off that has not connected by then; enable gives it ACTIVATE_DAYS again.
-# Profiles (owner 2026-10-26: editable from the portal): one line each in $PROFILES, name TAB routes TAB dns TAB
+# Profiles (editable from the portal): one line each in $PROFILES, name TAB routes TAB dns TAB
 # ipv6 (on|off) TAB allow ("-" or allowed destinations) TAB description. IPv6 on: the client gets fd66:66::N next to 10.66.0.N and vpn1 forwards (NAT66) to
 # the profile's IPv6 routes; off: IPv6 from the peer is dropped (an IPv6 route like ::/0 then blocks leaks). Every
 # server-side peer owns both addresses. Re-import list $REIMPORT: peers whose client config changed (profile,
-# profile-set, server-set) until their config or QR is fetched again; dump's last field. Enforced on vpn1 (owner 2026-10-26; client configs are editable): add, remove, profile, profile-set
+# profile-set, server-set) until their config or QR is fetched again; dump's last field. Enforced on vpn1 (client configs are editable): add, remove, profile, profile-set
 # and profile-del regenerate the whole ruleset $NFT (per profile: peer set, route set, DNS servers), check it with
 # `nft -c` and load it in one transaction; a failed check keeps the old ruleset and exits 1. The ruleset is one
-# table, inet wgadmin (map vpn-standalone step 5): loading it replaces only that table, so it can share a host.
+# table, inet wgadmin: loading it replaces only that table, so it can share a host.
 # /etc/nftables.conf includes it, so reboot and `systemctl restart nftables` load it too.
 set -euo pipefail
 
@@ -86,11 +86,11 @@ LAN=$(envval LAN_IF); LAN=${LAN:-eth0}
 # NAT4=off: peers' IPv4 is routed, not masqueraded (the router has a route for 10.66.0.0/24 to this host and NATs it
 # to the internet; logs then show each peer's 10.66.0.N). IPv6 (fd66:66::/64) is always NAT66.
 NAT4=$(envval NAT4); NAT4=${NAT4:-on}
-# TRANSIT_IF (map vpn-transit, NAT4=off only): peers' IPv4 leaves through this interface, never through $LAN, by
+# TRANSIT_IF (NAT4=off only): peers' IPv4 leaves through this interface, never through $LAN, by
 # policy routing to TRANSIT_GW (routing()). Unset = $LAN. IPv6 always uses $LAN.
 OUT4=$(envval TRANSIT_IF); OUT4=${OUT4:-$LAN}
 [ "$NAT4" = off ] || OUT4=$LAN
-# INBOUND (map vps1-link): connections the router side may open to peers, SRC>DST[/tcp|udp/PORT[-PORT]],...
+# INBOUND: connections the router side may open to peers, SRC>DST[/tcp|udp/PORT[-PORT]],...
 # (e.g. 192.168.1.10/32>10.66.0.4/32/tcp/22). Empty = none: by default nothing reaches a peer from outside wg0.
 INBOUND=$(envval INBOUND)
 TUN4=10.66.0.0/24 RT_TABLE=66
@@ -184,10 +184,10 @@ elements() { [ -z "$1" ] || echo " elements = { $1 };"; }
 # answers ping; no peer-to-peer. A profile with DNS server addresses: DNS (53, 853) from its peers only to those.
 # IPv6 only for profiles with ipv6 on (their peers' fd66:66::N to the profile's IPv6 routes, NAT66, same DNS limit);
 # other peers' IPv6 is dropped, so their IPv6 routes (::/0) only keep IPv6 from leaking outside the tunnel.
-# Allowed destinations (field 5, "-" = none; map vpn-profile-rules): the peers reach only those (plus their DNS
+# Allowed destinations (field 5, "-" = none): the peers reach only those (plus their DNS
 # servers), not the whole routes.
 # One rule per allowed destination $2 (CIDR[/tcp|udp/PORT[-PORT]]) of profile id $1 and family $3 (4|6), in list
-# order (first match wins): accept, or drop for a "!" entry (map vpn-least-privilege, 2026-11-01: e.g.
+# order (first match wins): accept, or drop for a "!" entry (2026-11-01: e.g.
 # "...,!192.168.0.0/16,0.0.0.0/0" = listed LAN hosts, no other LAN, the whole internet).
 allow_rule() {
   local a p proto ports fam=ip peers=@$1_peers match verdict=accept x=$2
@@ -298,7 +298,7 @@ firewall() {  # write + check + load $NFT in one transaction; a failed check kee
   nft -f "$NFT"
   routing
 }
-# Policy routing (map vpn-routing-mode): with a transit interface, peers' IPv4 (from $TUN4) goes to table $RT_TABLE,
+# Policy routing: with a transit interface, peers' IPv4 (from $TUN4) goes to table $RT_TABLE,
 # default via TRANSIT_GW; traffic to the peers stays in main (wg0). Otherwise the rules and table are removed.
 # Idempotent; firewall (every verb, install.sh) and sync (boot) call it. Only these two rules are touched.
 routing() {
@@ -314,7 +314,7 @@ routing() {
     echo "routing: no route to $gw on $OUT4; device traffic is dropped until it is reachable" >&2
 }
 addr4() { ip -4 -o addr show dev "$1" scope global 2>/dev/null | awk '{print $4; exit}'; }
-# VPN log (map wg-admin-log, owner 2026-11-01): rsyslog keeps the VPN's lines in $VLOG for the Log tab (logrotate,
+# VPN log: rsyslog keeps the VPN's lines in $VLOG for the Log tab (logrotate,
 # LOG_DAYS days) and, when SYSLOG_HOST is set, also forwards them through a disk-assisted queue: a slow or missing
 # syslog server never blocks the local file. Lines: wg-conn (wg-connlog.sh), kernel WireGuard messages, wg-admin audit.
 VLOG=/var/log/wg-admin/vpn.log
@@ -356,7 +356,7 @@ case "$cmd" in
     field "$profile" 2 >/dev/null
     override=${4:-}; [ "$override" != "-" ] || override=""  # "-": no ALLOWED override (wg-admin passes DAYS after it)
     allowed=${override:-$(field "$profile" 2)}
-    days=${5:-$ACTIVATE_DAYS}  # activation deadline in days, 1-30 (wg-admin, owner 2026-11-02)
+    days=${5:-$ACTIVATE_DAYS}  # activation deadline in days, 1-30 (wg-admin)
     [[ $days =~ ^[1-9][0-9]?$ ]] && (( days <= 30 )) || days=$ACTIVATE_DAYS
     grep -qx "# name: $name" "$CONF" && { echo "$name exists"; exit 1; }
     ENDPOINT=$(envval ENDPOINT) KEEPALIVE=$(envval KEEPALIVE)
@@ -402,7 +402,7 @@ EOF
       "$CONF" > "$CONF.new"
     chmod 600 "$CONF.new"; mv "$CONF.new" "$CONF"
     # Re-import only when the client config changed: profiles with the same routes, DNS and IPv6 (e.g. full and a
-    # restricted full-tunnel profile) differ only in vpn1's firewall (map vpn-least-privilege, 2026-11-01).
+    # restricted full-tunnel profile) differ only in vpn1's firewall (2026-11-01).
     note=""
     if [ -f "$DIR/$name.conf" ]; then
       before=$(cat "$DIR/$name.conf")
@@ -425,7 +425,7 @@ EOF
     echo "tags $name $tags"
     ;;
   email)
-    # Device owner's address (map vpn-mail, owner 2026-10-26); "-" = none.
+    # Device owner's address; "-" = none.
     need_peer
     email=${3:-}
     [[ "$email" =~ $EMAIL_RE && ${#email} -le 254 ]] || { echo "email: an address like anna@example.org, - = none"; exit 2; }
@@ -457,7 +457,7 @@ EOF
     routing
     ;;
   ids)
-    # Comment lines only: the live wg0 and the client configs stay as they are (map wg-admin-log-groups, 2026-11-02).
+    # Comment lines only: the live wg0 and the client configs stay as they are (2026-11-02).
     awk 'BEGIN{RS=""; ORS="\n\n"; uu="cat /proc/sys/kernel/random/uuid"}
       /# name: / && !/\n# id: / { uu | getline u; close(uu); sub(/# name: [^\n]*/, "&\n# id: " u) } {print}' \
       "$CONF" > "$CONF.new"
@@ -466,7 +466,7 @@ EOF
     fi
     ;;
   deadlines)
-    # Peers added before the activation deadline (owner 2026-11-02) get one: now + ACTIVATE_DAYS (install.sh).
+    # Peers added before the activation deadline get one: now + ACTIVATE_DAYS (install.sh).
     # After "# created:", else after the last of "# name:" / "# id:". Comment lines only, like ids.
     awk -v by="$(( $(date +%s) + ACTIVATE_DAYS * 86400 ))" 'BEGIN{RS=""; ORS="\n\n"}
       /# name: / && !/\n# activate-by: / {
@@ -643,7 +643,7 @@ EOF
     # IPv6 upstream = a global address on the LAN interface and a default route (wg0's fd66:66::1 does not count).
     if [ -n "$(ip -6 addr show dev "$LAN" scope global 2>/dev/null)" ] && [ -n "$(ip -6 route show default 2>/dev/null)" ]
     then echo "ipv6_upstream=1"; else echo "ipv6_upstream=0"; fi
-    # Traffic paths (map vpn-transit): addresses per leg; the transit gateway is table 66's default route.
+    # Traffic paths: addresses per leg; the transit gateway is table 66's default route.
     tif=$OUT4
     if [ "$tif" != "$LAN" ]; then
       tgw=$(ip -4 route show table 66 default 2>/dev/null | awk '{print $3; exit}')
@@ -670,7 +670,7 @@ EOF
     echo "dns_ok=$dns"
     ;;
   server)
-    # Read-only key=value lines for wg-admin's Server view (map vpn-standalone step 2). The public key only.
+    # Read-only key=value lines for wg-admin's Server view. The public key only.
     iface() { sed -n "1,/^\[Peer\]/{s/^$1 *= *//p}" "$CONF" | head -n1; }
     ka=$(envval KEEPALIVE)
     echo "endpoint=$(envval ENDPOINT)"
@@ -688,7 +688,7 @@ EOF
     echo "kernel=$(uname -r)"
     ;;
   server-set)
-    # Server settings (map vpn-standalone step 2b). Listen port: wg0.conf, applied live (wg syncconf); the router's
+    # Server settings. Listen port: wg0.conf, applied live (wg syncconf); the router's
     # port forward must follow it. Endpoint/keepalive: vpn.env + every client config (devices re-import).
     endpoint=${2:-} port=${3:-} ka=${4:-}
     [[ $endpoint =~ ^([a-z0-9.-]{1,253}|\[[0-9a-f:]{2,39}\]):[0-9]{1,5}$ ]] || { echo "endpoint: host:port"; exit 2; }
@@ -717,7 +717,7 @@ EOF
     echo "server saved: endpoint $endpoint, listen port $port, keepalive $ka; $count client configs updated"
     ;;
   network)
-    # Read-only key=value lines for Server > Network (map vpn-routing-mode); one iface= line per interface with IPv4.
+    # Read-only key=value lines for Server > Network; one iface= line per interface with IPv4.
     echo "mode=$([ "$NAT4" = off ] && echo route || echo nat)"
     echo "lan_if=$LAN"
     echo "transit_if=$OUT4"
@@ -729,7 +729,7 @@ EOF
     done
     ;;
   network-set)
-    # network-set nat|route IN_IF OUT_IF GW (map vpn-routing-mode). IN_IF: WireGuard UDP and this host's own traffic
+    # network-set nat|route IN_IF OUT_IF GW. IN_IF: WireGuard UDP and this host's own traffic
     # (LAN_IF). route: peers' IPv4 routed (router: static route for 10.66.0.0/24 + outbound NAT); OUT_IF != IN_IF =
     # transit leg, policy-routed to GW. nat: masqueraded on IN_IF (router: only the UDP port forward). No client
     # config changes. "-" = no GW.
@@ -817,7 +817,7 @@ EOF
     ;;
   export)
     # The whole VPN state: server + client keys, peers, profiles, vpn.env, wg-admin logins/tokens/mail/TLS key.
-    # Encrypted with age; the owner types the passphrase (never stored). -a = text file, safe to copy anywhere.
+    # Encrypted with age; the admin types the passphrase (never stored). -a = text file, safe to copy anywhere.
     out=${2:-}
     [ -n "$out" ] && [ ! -e "$out" ] || { echo "usage: vpn-peer export FILE (a new file)"; exit 2; }
     command -v age >/dev/null || { echo "age not installed (apt-get install age)"; exit 1; }

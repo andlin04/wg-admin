@@ -1,11 +1,11 @@
-// wg-admin UI (map vpn-standalone): peers, profiles and the health map of this WireGuard server.
+// wg-admin UI: peers, profiles and the health map of this WireGuard server.
 // One module for both homes: the portal's VPN tab imports it from /vpn/ui.js (nginx proxy, portal login), and
 // vpn1's own page (index.html) mounts it after a local sign-in. API paths are relative to where this file lives.
 const BASE = new URL(".", import.meta.url).pathname;
 let root = null, onAuth = () => location.reload();
 let PROFILES = [], SCHEDULES = [], tagFilter = "", info = null;
 const PICKED = new Set();  // device names ticked for "Email owners" and "Bulk edit"
-const BULK = { open: false, on: {}, val: {} };  // the Bulk edit panel survives re-renders (map wg-admin-bulk)
+const BULK = { open: false, on: {}, val: {} };  // the Bulk edit panel survives re-renders
 const OPENED = new Set();  // device rows expanded to show their settings and actions (collapsed by default)
 
 const $ = (id) => root.querySelector("#" + id);
@@ -81,7 +81,7 @@ const MARKUP = `
     <p class="meta" id="vpnhwhen" role="status"></p>
     <div class="topo vpnchain" id="vpnchain"><div class="nodata">Loading…</div></div>  </aside>
   <div class="vpnmain">
-  <!-- Tabs in set-up order (owner 2026-10-27): profiles and schedules first, so a new device can pick them -->
+  <!-- Tabs in set-up order: profiles and schedules first, so a new device can pick them -->
   <div class="seg vpnseg" role="group" aria-label="View">
     <button type="button" class="segbtn vpnadmin" data-vview="profiles" aria-pressed="false">Connection profiles</button>
     <button type="button" class="segbtn" data-vview="schedules" aria-pressed="false">Schedules</button>
@@ -90,7 +90,7 @@ const MARKUP = `
     <button type="button" class="segbtn vpnadmin" data-vview="groups" aria-pressed="false">Groups</button>
     <button type="button" class="segbtn vpnadmin" data-vview="users" aria-pressed="false">Users</button>
     <button type="button" class="segbtn" data-vview="log" aria-pressed="false">Log</button></div>
-  <!-- Log (map wg-admin-log): admins only; connection log, kernel WireGuard messages, admin actions -->
+  <!-- Log: admins only; connection log, kernel WireGuard messages, admin actions -->
   <div class="vpnview" id="vpnvlog" hidden>
   <div class="pagehead vpnphead"><div><h2>Log</h2><p>Connections (connect, handshake, roam, end), WireGuard's own
     handshake messages and admin actions, newest first. Problems are marked: "Invalid handshake" = wrong or old key on
@@ -105,7 +105,7 @@ const MARKUP = `
     <span class="meta" id="vpnlmsg" role="status"></span></form>
   <div id="vpnlbox"><div class="nodata">Loading…</div></div>
   </div>
-  <!-- Groups + Users (map wg-admin-groups): admins only; the server refuses everyone else -->
+  <!-- Groups + Users: admins only; the server refuses everyone else -->
   <div class="vpnview" id="vpnvgroups" hidden>
   <div class="pagehead vpnphead"><div><h2>Groups</h2><p>Devices grouped for group admins. A group admin manages only
     its groups' devices, with the connection profiles and schedules linked here.</p></div>
@@ -288,7 +288,7 @@ const MARKUP = `
       <button class="btn ghost sm" type="button" id="vpnscancel">Cancel</button> <span id="vpnsmsg" class="meta" role="status"></span></div>
   </form>
   <div id="vpnsbox"><div class="nodata">Loading…</div></div>
-  <!-- Network (map vpn-routing-mode): NAT or routed IPv4, incoming and transit interface -->
+  <!-- Network: NAT or routed IPv4, incoming and transit interface -->
   <div class="pagehead vpnphead"><div><h2 id="vpnn-h">Network</h2><p>How device traffic leaves the server.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnnedit" type="button" aria-expanded="false" aria-controls="vpnnform">Edit</button></div></div>
   <form id="vpnnform" class="factform" hidden>
@@ -307,7 +307,7 @@ const MARKUP = `
       <button class="btn ghost sm" type="button" id="vpnncancel">Cancel</button> <span id="vpnnmsg" class="meta" role="status"></span></div>
   </form>
   <div id="vpnnbox"><div class="nodata">Loading…</div></div>
-  <!-- Firewall (owner 2026-10-27: readable instead of raw nftables): read from vpn1's live ruleset -->
+  <!-- Firewall (readable instead of raw nftables): read from vpn1's live ruleset -->
   <div class="pagehead vpnphead"><div><h2 id="vpnfw-h">Firewall</h2><p>What the server's firewall lets each connection
     profile's devices reach, read from the live rules. Edit rules: change a profile's allowed destinations here.</p></div>
     <div class="userrow-actions"><button class="btn sm" id="vpnfwreload" type="button">Reload</button>
@@ -369,7 +369,7 @@ const MARKUP = `
   </form>
   </div>
   </div>
-  <!-- Info box (owner 2026-10-27): what this is + short how-tos, right of everything -->
+  <!-- Info box: what this is + short how-tos, right of everything -->
   <aside class="vpnhealth vpninfo" aria-labelledby="vpni-h">
     <h2 id="vpni-h">About</h2>
     <p class="meta">WireGuard on the server (wg-admin). One peer per device; it reaches only its profile's routes, not the server
@@ -444,7 +444,7 @@ function profileForm(p) {
   $("vpnpname").value = p ? p.name : "";
   $("vpnpname").readOnly = !!p;
   $("vpnproutes").value = p ? p.routes.join("\n") : "";
-  // New profile: a real value (owner 2026-10-27: a grey placeholder looked like a default but saved nothing)
+  // New profile: a real value (a grey placeholder looked like a default but saved nothing)
   $("vpnpdns").value = p ? p.dns.join(", ") : PROFILES.length ? PROFILES[0].dns.join(", ") : "";
   $("vpnpdesc").value = p ? p.description : "";
   $("vpnpallow").value = p ? (p.allow || []).join("\n") : "";
@@ -459,12 +459,12 @@ function profileForm(p) {
   (p ? $("vpnproutes") : $("vpnpname")).focus();
 }
 
-// Profile templates (map vpn-standalone step 3): prefill the add form; DNS from the first existing profile.
+// Profile templates: prefill the add form; DNS from the first existing profile.
 const TEMPLATES = {
   lan: ["10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16", "LAN only: private networks through the VPN, the rest stays local."],
   full: ["0.0.0.0/0\n::/0", "Full tunnel: all traffic through the VPN."],
   hosts: ["", "Only the listed hosts through the VPN."],
-  // map vpn-profile-rules (owner 2026-10-27): everything enters the tunnel, vpn1 passes only the allowed list
+  // everything enters the tunnel, vpn1 passes only the allowed list
   locked: ["0.0.0.0/0\n::/0", "Full tunnel, listed hosts only: no internet while connected."],
 };
 function useTemplate(key) {
@@ -489,7 +489,7 @@ async function saveBulk(ev) {
   loadPeers();
 }
 
-// List tables (owner 2026-10-27): a filter box filters as you type, PAGE rows per page with prev/next.
+// List tables: a filter box filters as you type, PAGE rows per page with prev/next.
 const PAGE = 25;  // default rows per page (paged)
 const PAGES = { devices: 0, profiles: 0, schedules: 0, log: 0 };
 // hit(item, term): optional extra match beyond the text, e.g. an IP inside a profile's routes
@@ -558,7 +558,7 @@ function paged(key, items, rerender) {
   return [items.slice(at * size, (at + 1) * size), nav];
 }
 
-// Collapsible rows and sections (owner 2026-11-02): "kind:name" in OPENED = expanded; the arrow sits at the right
+// Collapsible rows and sections: "kind:name" in OPENED = expanded; the arrow sits at the right
 const isOpen = (kind, name) => OPENED.has(`${kind}:${name}`);
 function chevBtn(kind, name, rerender) {
   const open = isOpen(kind, name), b = el("button", "vpnrowhead");
@@ -644,9 +644,9 @@ function renderProfiles() {
   box.replaceChildren(openAllBar("prof", rows.map((p) => p.name), renderProfiles), wrap, nav);
 }
 
-// Schedules (api/schedules, map vpn-totp-schedules): table + form; times are vpn1's local wall clock.
+// Schedules (api/schedules): table + form; times are vpn1's local wall clock.
 const wall = (iso) => iso ? iso.replace("T", " ").slice(0, 16) : "";
-// Editor rows (owner 2026-10-27: pickers, no free text): day ticks + from/to dropdowns; date pickers for dates.
+// Editor rows (pickers, no free text): day ticks + from/to dropdowns; date pickers for dates.
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const QUARTERS = Array.from({ length: 97 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, "0")}:${String(i % 4 * 15).padStart(2, "0")}`);
 function timeSelect(label, value, last) {
@@ -851,10 +851,10 @@ function renderPeers() {
     mailBtn.textContent = `Email owners (${PICKED.size})`; mailBtn.disabled = !PICKED.size; setBtn.textContent = `Bulk edit (${PICKED.size})`; bulkCount();
   };
   count();
-  // Expand all / Collapse all for the rows on screen, at the bar's right end (owner 2026-11-02)
+  // Expand all / Collapse all for the rows on screen, at the bar's right end
   const openBtn = openAllBtn("dev", rows.map((p) => p.name), renderPeers);
   bar.append(mailBtn, setBtn, openBtn);
-  // Status only on request: no timer re-renders the list under the admin (owner 2026-11-02). Right above the table,
+  // Status only on request: no timer re-renders the list under the admin. Right above the table,
   // on the tag filter's line.
   const refresh = el("button", "btn sm", "Refresh"), above = el("div", "vpnabove");
   refresh.type = "button";
@@ -863,7 +863,7 @@ function renderPeers() {
   above.append(chips, refresh);
   renderBulk();
   if (!shown.length) { box.replaceChildren(above, el("div", "nodata", "No device matches the filter.")); return; }
-  // One tbody per device (owner 2026-11-02): row 1 tick, name, address, profile, on/off, status, expand; row 2 the
+  // One tbody per device: row 1 tick, name, address, profile, on/off, status, expand; row 2 the
   // grouping (group, schedule, tags, owner); expanded: pickers in row 2, traffic and actions in row 3.
   const wrap = el("div", "tablewrap"), t = el("table", "vpncoll");
   t.innerHTML = "<thead><tr><th></th><th>Device</th><th>IP</th><th>Profile</th><th>On</th><th>Status</th><th></th></tr></thead>";
@@ -890,7 +890,7 @@ function renderPeers() {
       ps.onchange = () => act(p, "profile", ps.value);
       prof.appendChild(ps);
     } else prof.textContent = p.profile;
-    // slider: green on, grey off (owner 2026-10-27)
+    // slider: green on, grey off
     const on = el("td"), tg = el("button", "vpnswitch");
     tg.type = "button";
     tg.setAttribute("role", "switch");
@@ -912,7 +912,7 @@ function renderPeers() {
       ri.title = "Its config changed: show the QR or download the package for the device";
       seen.append(" ", ri);
     }
-    // activation deadline (owner 2026-11-02): devices added since then must connect once in time
+    // activation deadline: devices added since then must connect once in time
     if (p.activate_by && !p.activated) {
       const late = !p.handshake && now > p.activate_by;
       const ab = el("span", "pill " + (late ? "warn" : "nodot"), late ? "not activated" : "activate by " + new Date(p.activate_by * 1000).toLocaleDateString());
@@ -984,7 +984,7 @@ function renderPeers() {
   box.replaceChildren(above, wrap, nav);
 }
 
-// Tags of one device as a dropdown with a tick per known tag and a box for new ones (owner 2026-11-02); Save sends
+// Tags of one device as a dropdown with a tick per known tag and a box for new ones; Save sends
 // the whole list (api/peers/NAME/tags, max 8).
 function tagPicker(p, allTags) {
   const dd = el("details", "vpntagpick"), sum = el("summary", "btn sm", `Tags (${p.tags.length})`), menu = el("div", "vpntagmenu");
@@ -1016,7 +1016,7 @@ function tagPicker(p, allTags) {
   return dd;
 }
 
-// Bulk edit (api/peers/apply, map wg-admin-bulk): tick the settings to change, set their values, apply all of them
+// Bulk edit (api/peers/apply): tick the settings to change, set their values, apply all of them
 // to every ticked device in one go; the server checks each device as single edits (Enabled last) and reports the
 // ones it refused.
 const BULK_SETTINGS = [["profile", "Profile"], ["group", "Group"], ["schedule", "Schedule"], ["enabled", "Enabled"],
@@ -1249,7 +1249,7 @@ async function saveServer(ev) {
     loadPeers();
   } catch (x) { $("vpnsmsg").textContent = x.message; }
 }
-// Reboot (map wg-admin-reboot): confirm names the host and who gets cut off; then wait until the server answers.
+// Reboot: confirm names the host and who gets cut off; then wait until the server answers.
 async function rebootServer() {
   const msg = $("vpnrebootmsg"), btn = $("vpnreboot");
   let d;
@@ -1381,7 +1381,7 @@ function parseRuleset(text) {
       continue;
     }
     if (cur && buf === null && /^\s*\}\s*$/.test(line)) { cur = null; continue; }
-    // "!" allow entries (map vpn-least-privilege) are drop rules in list order: shown as "blocked X" in place
+    // "!" allow entries are drop rules in list order: shown as "blocked X" in place
     if ((m = /\b(ip6?) saddr @(\S+?)_peers6? (.*)\b(accept|drop)\s*$/.exec(line)) && !line.includes("dport { 53, 853 }")) {
       const d = /daddr (\S+)(?: (tcp|udp) dport (\S+))?/.exec(m[3]);
       if (!d) continue;
@@ -1449,7 +1449,7 @@ function renderFirewall(text) {
   box.replaceChildren(wrap, el("p", "meta", "For every device:"), always);
   secSum("Firewall", `${rows.length} connection profile${rows.length === 1 ? "" : "s"} in the live rules`);
 }
-// Rule editor (owner 2026-10-27: edit the firewall on the Server view): one row per allowed destination, saved as
+// Rule editor (edit the firewall on the Server view): one row per allowed destination, saved as
 // the profile's allow list through api/profiles; vpn-peer checks it and reloads the firewall, no re-import.
 function ruleRow(line) {
   const [dst = "", proto = "", port = ""] = (line || "").split(/\s+/);
@@ -1554,7 +1554,7 @@ async function saveMail(ev) {
   try { renderMail(await api("api/mail", { method: "PUT", body: JSON.stringify(body) })); mailForm(false); }
   catch (x) { $("vpnmmsg").textContent = x.message; }
 }
-// Logging settings (api/logging, map wg-admin-log): local days, syslog forward, sizes to judge the days by
+// Logging settings (api/logging): local days, syslog forward, sizes to judge the days by
 let LOGCFG = {};
 function renderLogging(g) {
   LOGCFG = g;
@@ -1620,7 +1620,7 @@ function showView(name) {
   if (name === "log") loadLog();
 }
 
-// Log tab (api/log, map wg-admin-log): the server filters (search words, kind, period); loaded when the tab opens
+// Log tab (api/log): the server filters (search words, kind, period); loaded when the tab opens
 const LOGKIND = { conn: "connection", wireguard: "WireGuard", admin: "admin" };
 let logTimer = 0;
 async function loadLog() {
@@ -1636,7 +1636,7 @@ function renderLog(d = LOGDATA) {
   if (!d.rows.length) { $("vpnlbox").replaceChildren(el("div", "nodata", "Nothing in this period for this search.")); return; }
   const wrap = el("div", "tablewrap"), t = el("table", "vpnlog"), tb = el("tbody");
   t.innerHTML = "<thead><tr><th>Time</th><th>Device</th><th>Kind</th><th>Event</th></tr></thead>";
-  // rows per page as on Devices (owner 2026-11-02); the API sends the newest 1000 at most
+  // rows per page as on Devices; the API sends the newest 1000 at most
   const [rows, nav] = paged("log", d.rows, () => renderLog());
   for (const r of rows) {
     const tr = el("tr"), dev = el("td"), kind = el("td");
@@ -1660,7 +1660,7 @@ function openLog(name) {
   showView("log");
 }
 
-// Roles (map wg-admin-groups): the state says who is asking; admin-only parts are hidden for group admins (the
+// Roles: the state says who is asking; admin-only parts are hidden for group admins (the
 // server refuses them anyway) and their lists are not loaded.
 let ROLE = "admin", GROUPS = [];
 const isAdmin = () => ROLE === "admin";
@@ -1801,7 +1801,7 @@ function renderUsers(d) {
   $("vpnubox").replaceChildren(openAllBar("user", USERS.map((u) => u.name), again), wrap);
 }
 async function userForm(u) {
-  // groups fetched each time: GROUPS is from the page load and missed groups made since (owner 2026-10-29)
+  // groups fetched each time: GROUPS is from the page load and missed groups made since
   let groups = GROUPS.map((g) => g.name);
   try { groups = (await api("api/groups")).groups.map((g) => g.name); } catch { /* keep the page-load list */ }
   $("vpnuformh").textContent = u ? `Edit ${u.name}` : "Add a user";
@@ -1837,7 +1837,7 @@ async function saveUser(ev) {
     loadGroups();
   } catch (x) { $("vpnumsg").textContent = x.message; }
 }
-// Admin password reset: a form with hidden fields and a Show toggle (prompt() showed the text, owner 2026-10-29)
+// Admin password reset: a form with hidden fields and a Show toggle (prompt() showed the text)
 function userPassword(u) {
   $("vpnupwh").textContent = `New password for ${u.name}`;
   $("vpnupwform").dataset.user = u.name;
@@ -1929,7 +1929,7 @@ export function mount(target, opts = {}) {
   $("vpnscadd").onclick = () => scheduleForm(null);
   $("vpnscwinadd").onclick = () => $("vpnscwins").appendChild(windowRow());
   $("vpnscdadd").onclick = () => $("vpnscdlist").appendChild(dateRow());
-  // Tabs: Profiles | Schedules | Devices | Server settings, each list with its own filter box (owner 2026-10-27)
+  // Tabs: Profiles | Schedules | Devices | Server settings, each list with its own filter box
   for (const b of root.querySelectorAll("[data-vview]")) b.onclick = () => showView(b.dataset.vview);
   for (const [id, key, fn] of [["vpndq", "devices", renderPeers], ["vpnpq", "profiles", renderProfiles], ["vpnscq", "schedules", renderSchedules]])
     $(id).oninput = () => { PAGES[key] = 0; fn(); };

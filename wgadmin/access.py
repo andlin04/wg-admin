@@ -1,4 +1,4 @@
-"""Device groups, roles and the sign-in policy (map wg-admin-groups, owner decisions 2026-10-29).
+"""Device groups, roles and the sign-in policy.
 
 Roles per web UI account (users.json, auth.py): admin = everything; group-admin = the devices of one or more
 groups, picking from the profiles and schedules an admin linked to each group, creating schedules for them. A device
@@ -36,10 +36,10 @@ def load(path: Path) -> dict[str, Any]:
               for k, v in (data.get("groups") or {}).items() if isinstance(v, dict)}
     members = {k: v for k, v in (data.get("members") or {}).items() if isinstance(v, str) and v in groups}
     roles = [r for r in data.get("totp_roles") or [] if r in ROLES]
-    # password history (owner 2026-10-29): the last N passwords can't be reused; 0 = off
+    # password history: the last N passwords can't be reused; 0 = off
     hist = data.get("pw_history", PW_HISTORY)
     hist = min(max(hist, 0), PW_HISTORY_MAX) if isinstance(hist, int) else PW_HISTORY
-    # activation deadline for new devices (owner 2026-11-02): default days, may group admins change it
+    # activation deadline for new devices: default days, may group admins change it
     days = data.get("deadline_days", DEADLINE_DAYS)
     days = days if isinstance(days, int) and DEADLINE_MIN <= days <= DEADLINE_MAX else DEADLINE_DAYS
     # devices switched off for a copied key: {name: {"id", "off", "at"}}; a manual switch-on sets off false, and
@@ -89,7 +89,7 @@ def check_account(role: str, groups: list[str], sign_in: str, expires: str, know
     """Role, groups, sign-in schedule and expiry of an account (VpnError names the bad field)."""
     if role not in ROLES:
         raise VpnError("role: admin or group-admin")
-    # A group admin without groups is allowed (owner 2026-10-29): it sees no devices until an admin assigns one.
+    # A group admin without groups is allowed: it sees no devices until an admin assigns one.
     groups = sorted(set(groups)) if role == "group-admin" else []
     for g in groups:
         if g not in known_groups:

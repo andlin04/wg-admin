@@ -1,5 +1,5 @@
 #!/bin/bash
-# VPN connection log (map wg-admin-log, owner 2026-11-01): every 30 s from wg-connlog.timer (installed as
+# VPN connection log: every 30 s from wg-connlog.timer (installed as
 # /usr/local/sbin/wg-connlog). Compares `wg show wg0 dump` with the last run and writes journal lines, tag wg-conn:
 #   event=connect    first handshake after none or an ended session
 #   event=handshake  new handshake in a running session (WireGuard re-keys every 2 min while traffic flows)

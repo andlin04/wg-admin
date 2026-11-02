@@ -39,7 +39,7 @@ Newest first. `install.sh` applies an update in place; settings, keys and device
 ## 2026-11-02: Refresh button for device status
 
 - **Refresh** right above the device table (on the tag filter line, at the right) reloads device status; open rows, ticks and the page stay. Nothing
-  reloads the list on a timer (owner: refreshes mid-work are annoying).
+  reloads the list on a timer (a re-render mid-work is annoying).
 
 ## 2026-11-02: device ids, Log tab for group admins
 

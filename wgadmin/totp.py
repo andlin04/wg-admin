@@ -1,4 +1,4 @@
-"""TOTP second factor for local accounts (map vpn-totp-schedules, owner 2026-10-27): RFC 6238 with the standard
+"""TOTP second factor for local accounts: RFC 6238 with the standard
 library, the defaults Google Authenticator and other apps assume (SHA-1, 30 s, 6 digits)."""
 from __future__ import annotations
 

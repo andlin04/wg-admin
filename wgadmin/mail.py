@@ -1,6 +1,6 @@
-"""Mail from wg-admin (map vpn-mail): SMTP settings in mail.json, the relay password in smtp.secret (both 600
+"""Mail from wg-admin: SMTP settings in mail.json, the relay password in smtp.secret (both 600
 wgadmin, created by setup-vpn1.sh; written in place: wgadmin cannot create files in /etc/wg-admin), smtplib only.
-Notices carry no key material (owner 2026-10-26): device name, what changed, how to get the new config."""
+Notices carry no key material: device name, what changed, how to get the new config."""
 from __future__ import annotations
 
 import json
@@ -38,7 +38,7 @@ Ask your administrator for the new configuration (QR code or file). This mail ho
 Kind regards,
 VPN administration
 """
-# Devices added with an activation deadline (owner 2026-11-02)
+# Devices added with an activation deadline
 DEADLINE = ("{name} must be activated (connected once) by {date}{within}, or it is switched off. The"
             " stored copy of its configuration is deleted after activation: keep the QR code or file safe until then.")
 ALERT = """Hello,
@@ -81,7 +81,7 @@ def _write(path: Path, text: str) -> None:
 def check(s: dict[str, Any]) -> dict[str, Any]:
     out = {"from_addr": str(s.get("from_addr", "")).strip(), "host": str(s.get("host", "")).strip().lower(),
            "port": s.get("port"), "security": s.get("security"), "user": str(s.get("user", "")).strip(),
-           "admin": str(s.get("admin", "")).strip()}  # admin copy address (owner 2026-11-02), "" = none
+           "admin": str(s.get("admin", "")).strip()}  # admin copy address, "" = none
     if out["admin"] and (len(out["admin"]) > 254 or not EMAIL.match(out["admin"])):
         raise VpnError("admin address: a plain address like admin@example.org, or empty")
     if not EMAIL.match(out["from_addr"]):
@@ -140,7 +140,7 @@ def notice(s: dict[str, Any], to: str, names: list[str], kind: str,
             lines.append(DEADLINE.format(name=n, date=when(p["activate_by"]),
                                          within=f", within {d} days of being set up" if d else ""))
     msg = message(s, to, subj, BODY.format(lines="\n\n".join(lines)))
-    if s.get("admin") and s["admin"] != to:  # the admins get a copy (owner 2026-11-02)
+    if s.get("admin") and s["admin"] != to:  # the admins get a copy
         msg["Bcc"] = s["admin"]
     return msg
 

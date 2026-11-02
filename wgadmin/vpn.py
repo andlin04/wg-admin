@@ -1,4 +1,4 @@
-"""WireGuard peers and profiles on this host (map points vpn-admin, vpn-standalone; owner decisions 2026-10-26).
+"""WireGuard peers and profiles on this host ().
 
 wg-admin runs as the unprivileged user wgadmin and reaches vpn-peer only through `sudo -n vpn-gate "<request>"`
 (deploy/vpn/vpn-gate.sh): fixed requests only, so the gate's checks stay the boundary to root. Names, routes, DNS and
@@ -75,9 +75,9 @@ def _items(text: str) -> list[str]:
 
 
 def allow_rules(text: str, ipv6: bool) -> list[str]:
-    """Allowed destinations (map vpn-profile-rules, owner 2026-10-27): one rule per line or comma,
+    """Allowed destinations: one rule per line or comma,
     `CIDR` or `CIDR tcp|udp PORT[-PORT]` -> gate tokens `CIDR[/proto/PORT[-PORT]]`. Empty = the routes.
-    In order, first match wins; a leading "!" blocks (map vpn-least-privilege, 2026-11-01)."""
+    In order, first match wins; a leading "!" blocks (2026-11-01)."""
     out = []
     for line in re.split(r"[\n,]", text):
         rest = line.strip()
@@ -226,7 +226,7 @@ def peers(cfg: Config, runner: Runner | None = None) -> list[dict[str, Any]]:
 
 
 def check_days(days: int) -> int:
-    """Activation deadline in days (owner 2026-11-02): 1-30."""
+    """Activation deadline in days: 1-30."""
     if not isinstance(days, int) or isinstance(days, bool) or not 1 <= days <= 30:
         raise VpnError("days: 1-30")
     return days
@@ -247,7 +247,7 @@ def set_tags(cfg: Config, name: str, tags: list[str], runner: Runner | None = No
 
 
 def check_email(email: str) -> str:
-    """Device owner's address (map vpn-mail); "" = none."""
+    """Device owner's address; "" = none."""
     email = email.strip()
     if email and (len(email) > 254 or not EMAIL.match(email)):
         raise VpnError("email: an address like anna@example.org")
@@ -269,7 +269,7 @@ BULK_MAX = 50
 
 
 def parse_bulk(text: str, profiles: set[str], existing: set[str]) -> list[tuple[str, str, list[str], str]]:
-    """Bulk add (map vpn-standalone step 3): CSV lines `name[,profile[,tags[,email]]]`, tags separated by spaces
+    """Bulk add: CSV lines `name[,profile[,tags[,email]]]`, tags separated by spaces
     or ';'.
     Blank lines, '#' comments and a `name,...` header are skipped; profile defaults to split. All lines are checked
     before anything is created: any error -> VpnError listing the bad lines."""
@@ -325,7 +325,7 @@ EDITABLE = ("endpoint", "listen_port", "keepalive")  # server_request; the rest 
 
 
 def server(cfg: Config, runner: Runner | None = None) -> list[dict[str, str]]:
-    """Server view (map vpn-standalone step 2): `vpn-peer server` as labelled rows; EDITABLE ones carry `edit`."""
+    """Server view: `vpn-peer server` as labelled rows; EDITABLE ones carry `edit`."""
     h = parse_health(call(cfg, "server", runner))
     defaults = {"mtu": "default (1420)", "endpoint": "not set (vpn.env)"}
     return [{"key": k, "label": label, "value": h.get(k) or defaults.get(k, "-"), "edit": k in EDITABLE}
@@ -359,7 +359,7 @@ IFACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$")
 
 
 def network(cfg: Config, runner: Runner | None = None) -> dict[str, Any]:
-    """Server > Network (map vpn-routing-mode): mode nat|route, incoming/transit interface, transit gateway and the
+    """Server > Network: mode nat|route, incoming/transit interface, transit gateway and the
     interfaces with an IPv4 address ({name, addr})."""
     out: dict[str, Any] = {"interfaces": []}
     for line in call(cfg, "network", runner).splitlines():
@@ -409,7 +409,7 @@ LOG_WARN = re.compile(r"Invalid|did not complete|giving up|unallowed|No route|Ze
 
 
 def parse_log(text: str) -> list[dict[str, Any]]:
-    """`vpn-peer log` (journalctl short-iso) -> {time, kind, peer, warn, text}, newest first (map wg-admin-log).
+    """`vpn-peer log` (journalctl short-iso) -> {time, kind, peer, warn, text}, newest first.
     kind: conn (wg-connlog.sh), wireguard (kernel), admin (wg-admin audit). The kernel knows peers only by number
     and endpoint: its lines get the device name from a wg-conn line with the same endpoint."""
     rows: list[dict[str, Any]] = []
@@ -458,7 +458,7 @@ def log(cfg: Config, hours: int, runner: Runner | None = None) -> list[dict[str,
     return parse_log(call(cfg, f"log {int(hours)}", runner))
 
 
-# Copied key (owner 2026-11-02): one key used from several places at once makes WireGuard's endpoint flip between
+# Copied key: one key used from several places at once makes WireGuard's endpoint flip between
 # their addresses. CLONE_CHANGES endpoint IP changes (ports ignored) within CLONE_WINDOW_S, back to an earlier IP.
 CLONE_WINDOW_S = 600
 CLONE_CHANGES = 3
@@ -525,7 +525,7 @@ def save_logging(cfg: Config, days: int, host: str, port: int, proto: str, runne
 
 
 def reboot(cfg: Config, runner: Runner | None = None) -> str:
-    """Server settings > Reboot (map wg-admin-reboot): the gate schedules the reboot 5 s ahead."""
+    """Server settings > Reboot: the gate schedules the reboot 5 s ahead."""
     return call(cfg, "reboot", runner).strip()
 
 
@@ -614,7 +614,7 @@ def _firewall_node(h: dict[str, str], err: str, load_text: str) -> dict[str, Any
 
 def _add_transit(pf: dict[str, Any], h: dict[str, str]) -> None:
     """The gateway's end of the transit link (TRANSIT_IF) on the same gateway node: one box per device, the links
-    show the legs (owner 2026-10-29)."""
+    show the legs."""
     t_gw = h.get("transit_gw") or "-"
     s, t = _probe(h.get("transit_loss", ""), h.get("transit_rtt_ms", ""))
     pf["details"][f"Transit gateway {t_gw} on {h['transit_if']} (ping)"] = t
@@ -676,8 +676,8 @@ def health(cfg: Config, runner: Runner | None = None, now: float | None = None,
                 else "No devices yet",
                 {"Connected (< 3 min)": ", ".join(conn) or "-", "Idle": ", ".join(idle) or "-",
                  "Never connected": ", ".join(never) or "-"})
-    # Topology (map vpn-transit): each box once, top to bottom; links = what crosses them, from = who starts it
-    # (owner 2026-10-29: short labels, the popups hold the rest).
+    # Topology: each box once, top to bottom; links = what crosses them, from = who starts it
+    # (short labels, the popups hold the rest).
     port = h.get("listen_port_conf") or str(WG_PORT)
     t_if = h.get("transit_if", "")
     links = [{"from": "devices", "to": "wan", "label": "VPN tunnel, encrypted"},

@@ -1,6 +1,6 @@
-"""Access schedules (map vpn-totp-schedules, owner 2026-10-27): named schedule profiles assigned to devices; wg-admin
+"""Access schedules: named schedule profiles assigned to devices; wg-admin
 switches each assigned device on or off with the existing enable/disable gate verbs (web.py runs tick() every
-60 s). Deterministic, no model (rule:automation-principle). Times are this host's local time.
+60 s). Deterministic, no model. Times are this host's local time.
 
 A schedule is on when today is inside valid-from..expires AND (it has no windows and no dates, OR a weekly window
 matches now, OR today is one of its calendar dates). A manual on/off of a scheduled device is a hold: it lasts

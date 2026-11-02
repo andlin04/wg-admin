@@ -1,6 +1,6 @@
 /* Standalone wg-admin only: the portal's design tokens and the shared components ui.js uses, copied from
    app/static/index.html (same values, so both homes look alike). Inside the portal its own CSS provides these. */
-/* Space for the scrollbar always: opening a part must not shift the page sideways (owner 2026-11-02) */
+/* Space for the scrollbar always: opening a part must not shift the page sideways */
 html { scrollbar-gutter: stable; }
 :root {
   --bg: #0b0d12; --surface: #12151c; --surface-2: #181c25; --surface-3: #202533; --border: #262b36;

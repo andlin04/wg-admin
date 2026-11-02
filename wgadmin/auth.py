@@ -5,7 +5,7 @@ X-Portal-Role and X-Wgadmin-Secret; those headers count only from a trusted prox
 Standalone: local accounts in users.json (scrypt), a session cookie held in memory (a restart signs everyone out).
 users.json: {name: {hash, role, groups, schedule, expires, disabled, default}} (access.py: roles, groups, sign-in
 hours); the default admin (the first account) is never demoted, disabled, scheduled, given an expiry or deleted.
-Optional second factor per account (totp.py, owner 2026-10-27): totp.json {name: {secret, last, recovery}}.
+Optional second factor per account (totp.py): totp.json {name: {secret, last, recovery}}.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from .config import Config
 
 COOKIE = "wgadmin_session"
 USER = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
-# stdlib scrypt, the parameters of the portal's app/users.py (owner 2026-10-27: best-practice user + password).
+# stdlib scrypt, the parameters of the portal's app/users.py (best-practice user + password).
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 15, 8, 1
 FAIL_LIMIT, FAIL_WINDOW_S = 5, 900
 
@@ -75,7 +75,7 @@ class Auth:
         return {k: v for k, v in data.items() if isinstance(v, dict) and v.get("secret")} if isinstance(data, dict) else {}
 
     def accounts(self) -> dict[str, dict[str, Any]]:
-        """users.json -> {name: {hash, role, groups, schedule, expires, disabled, default}} (map wg-admin-groups).
+        """users.json -> {name: {hash, role, groups, schedule, expires, disabled, default}}.
         A bare hash (before roles) is an admin; in a file of that old form the first account is the default admin.
         Otherwise none may be marked: a portal-SSO host whose accounts were all made in the web UI (vpn1)."""
         try:
@@ -121,7 +121,7 @@ class Auth:
     def set_password(self, name: str, password: str, history: int = 0, **fields: Any) -> None:
         """New password; a new account gets `fields` (role, groups, ...; default: admin, as the CLI makes them).
         Only the CLI's first account (no fields: install.sh) becomes the default admin; one made in the web UI
-        never does (owner 2026-10-29: egonn on vpn1 got locked as default and couldn't be demoted).
+        never does (egonn on vpn1 got locked as default and couldn't be demoted).
         history: the last N passwords (the current one included) can't be reused; 0 = no check (the CLI's
         break-glass reset). Ends the account's sessions."""
         if not USER.match(name):
@@ -151,7 +151,7 @@ class Auth:
         return len(gone)
 
     def new_token(self, name: str) -> str:
-        """API token for scripts (map vpn-standalone step 3b): returned once, stored as SHA-256 (random 32 bytes
+        """API token for scripts: returned once, stored as SHA-256 (random 32 bytes
         need no slow hash). The same name replaces its old token."""
         if not USER.match(name):
             raise ValueError("name: 1-64 letters, digits, . _ @ -")

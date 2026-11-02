@@ -1,5 +1,5 @@
 #!/bin/bash
-# wg-admin install (map wg-admin-package): WireGuard server + nftables + wg-admin web UI on one Debian 12/13 host.
+# wg-admin install: WireGuard server + nftables + wg-admin web UI on one Debian 12/13 host.
 # Idempotent; run as root from this directory (it holds every file it installs):
 #   bash install.sh [--endpoint HOST:PORT] [--hostname FQDN]
 #   --endpoint  what client configs connect to (kept in /etc/wireguard/vpn.env; omitted = kept, or set it later in
@@ -29,7 +29,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools nftables q
   python3-fastapi python3-uvicorn sudo openssl nginx rsyslog logrotate >/dev/null
 
 # ---------------------------------------------------------------- WireGuard
-# Only for new directories (rule:shared-dir-perms); wireguard-tools may already have made /etc/wireguard (700).
+# Only for new directories; wireguard-tools may already have made /etc/wireguard (700).
 for d in /etc/wireguard /etc/wireguard/clients; do [ -d "$d" ] || install -d -m 700 "$d"; done
 ENV=/etc/wireguard/vpn.env
 [ -f "$ENV" ] || (umask 077; : > "$ENV")
@@ -168,7 +168,7 @@ systemctl enable -q nftables wg-quick@wg0 wg-admin
 systemctl restart nftables
 systemctl is-active -q wg-quick@wg0 || systemctl start wg-quick@wg0
 systemctl restart wg-admin
-# VPN log (map wg-admin-log): local file + optional syslog forward (Server settings > Logging; kept settings on re-runs),
+# VPN log: local file + optional syslog forward (Server settings > Logging; kept settings on re-runs),
 # fed by wg-connlog (connections, handshakes) and the kernel's WireGuard messages; wg-admin's Log tab shows it.
 envget() { sed -n "s/^$1=//p" "$ENV" | head -n1; }
 /usr/local/sbin/vpn-peer logging-set "$(envget LOG_DAYS || true)" "$(envget SYSLOG_HOST || true)" \
