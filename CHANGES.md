@@ -2,6 +2,10 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-08: README opening
+
+- The first three lines state what wg-admin is and does.
+
 ## 2026-11-02: README rewritten
 
 - Features grouped by area, a contents line, short bullets and tables (roles, NAT or Route, command line).
