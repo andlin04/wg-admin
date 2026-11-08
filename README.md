@@ -1,6 +1,6 @@
 # wg-admin: WireGuard server + web UI
 
-**Make WireGuard scalable.**
+**Make WireGuard manageable at scale.**
 
 WireGuard is fast and simple, but hard to manage beyond a few peers: hand-edited configs, no users, no access control.
 wg-admin adds a self-hosted web UI for devices, keys, access profiles and admins, installed on one Debian host by one script.

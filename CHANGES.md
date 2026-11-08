@@ -5,7 +5,7 @@ Newest first. `install.sh` applies an update in place; settings, keys and device
 ## 2026-11-08: README opening
 
 - The first two lines state the purpose: WireGuard is hard to manage beyond a few peers; wg-admin adds a web UI for it.
-- The README starts with the tagline "Make WireGuard scalable."
+- The README starts with the tagline "Make WireGuard manageable at scale."
 
 ## 2026-11-02: README rewritten
 
