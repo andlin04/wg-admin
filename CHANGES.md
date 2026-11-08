@@ -4,7 +4,7 @@ Newest first. `install.sh` applies an update in place; settings, keys and device
 
 ## 2026-11-08: README opening
 
-- The first three lines state what wg-admin is and does.
+- The first two lines state the purpose: WireGuard is hard to manage beyond a few peers; wg-admin adds a web UI for it.
 
 ## 2026-11-02: README rewritten
 

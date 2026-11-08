@@ -1,8 +1,7 @@
 # wg-admin: WireGuard server + web UI
 
-A self-hosted WireGuard VPN server with a web UI, installed on one Debian host by one script.
-Every device gets its own key and an access profile; the server's firewall lets it reach only what that profile allows.
-Each config works on one device only, and admins and group admins manage devices with roles, 2FA and schedules.
+WireGuard is fast and simple, but hard to manage beyond a few peers: hand-edited configs, no users, no access control.
+wg-admin adds a self-hosted web UI for devices, keys, access profiles and admins, installed on one Debian host by one script.
 
 - Built from WireGuard, nftables and wg-admin (a FastAPI web UI and API behind nginx with TLS on port 8443).
 
