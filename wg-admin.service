@@ -1,22 +1,50 @@
-# wg-admin (deploy/vpn/wgadmin): WireGuard admin web UI + API on vpn1, 127.0.0.1:8080 behind nginx :8443 (LAN; the portal proxies /vpn/).
-# Installed by setup-vpn1.sh. Runs unprivileged; root only through `sudo -n vpn-gate` (fixed requests).
 [Unit]
 Description=wg-admin (WireGuard admin UI)
-After=network-online.target wg-quick@wg0.service
-Wants=network-online.target
+After=network-online.target wg-quick@wg0.service wg-admin-gate.socket
+Wants=network-online.target wg-admin-gate.socket
 
 [Service]
 User=wgadmin
 Group=wgadmin
 EnvironmentFile=/etc/wg-admin/wg-admin.env
 WorkingDirectory=/opt/wg-admin
-# Loopback only; nginx (wg-admin.nginx.conf) terminates TLS on :8443 and sends the client IP in X-Forwarded-For.
 ExecStart=/usr/bin/python3 -m uvicorn --factory wgadmin.web:main_app --host 127.0.0.1 --port 8080 \
   --no-server-header --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=on-failure
-# No ProtectSystem/NoNewPrivileges: vpn-peer runs in this unit's namespace through sudo and writes /etc/wireguard.
-PrivateTmp=true
+# Sandbox: a compromised web UI gets no root. Root work goes only through vpn-gate's socket (fixed requests);
+# no sudo or setuid, no capabilities, read-only system, writes only to its own files in /etc/wg-admin.
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ReadWritePaths=/etc/wg-admin
 ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+UMask=0077
+# A runaway request cannot starve WireGuard or the gate (uses ~60 MB, 6 tasks).
+MemoryMax=256M
+TasksMax=64
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target

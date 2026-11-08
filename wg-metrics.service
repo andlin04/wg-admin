@@ -4,3 +4,26 @@ Description=WireGuard metrics for node_exporter (deploy/vpn/wg-metrics.sh)
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/wg-metrics
+# Sandbox: reads wg0 (CAP_NET_ADMIN) and wg0.conf, writes only node_exporter's textfile directory.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/prometheus/node-exporter
+ProtectKernelTunables=true
+ProtectKernelLogs=true
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

@@ -1,0 +1,36 @@
+# One vpn-gate request from wg-admin-gate.socket, as root (it changes WireGuard, nftables and routes).
+# Sandboxed: a bug in vpn-gate or vpn-peer reaches only WireGuard and the firewall (CAP_NET_ADMIN), ping
+# (CAP_NET_RAW) and the files below; services (rsyslog restart, reboot) only through systemd.
+[Unit]
+Description=wg-admin root gate request
+CollectMode=inactive-or-failed
+
+[Service]
+ExecStart=/usr/local/sbin/vpn-gate --socket
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+RuntimeMaxSec=90
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+ProtectSystem=strict
+ReadWritePaths=/etc/wireguard /etc/nftables.d /etc/rsyslog.d /etc/logrotate.d
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+TasksMax=64

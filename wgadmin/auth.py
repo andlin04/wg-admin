@@ -27,6 +27,9 @@ USER = re.compile(r"^[A-Za-z0-9._@-]{1,64}$")
 # stdlib scrypt, the parameters of the portal's app/users.py (best-practice user + password).
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2 ** 15, 8, 1
 FAIL_LIMIT, FAIL_WINDOW_S = 5, 900
+# API tokens: read = GET requests except device configs, QR codes and packages (they hold private keys);
+# admin = everything an admin may do. New tokens expire after TOKEN_DAYS unless told otherwise (0 = never).
+TOKEN_SCOPES, TOKEN_DAYS, TOKEN_DAYS_MAX = ("read", "admin"), 90, 3650
 
 
 def hash_password(password: str) -> str:
@@ -104,12 +107,23 @@ class Auth:
     def _users(self) -> dict[str, str]:
         return {k: v["hash"] for k, v in self.accounts().items()}
 
-    def _tokens(self) -> dict[str, str]:
+    def _tokens(self) -> dict[str, dict[str, Any]]:
+        """tokens.json -> {name: {hash, scope, expires}}; expires: epoch, 0 = never. A bare hash (tokens made
+        before scopes) is an admin token that never expires: it keeps working until revoked or replaced."""
         try:
             data = json.loads(self.cfg.tokens_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return {}
-        return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
+        out: dict[str, dict[str, Any]] = {}
+        for name, v in (data.items() if isinstance(data, dict) else ()):
+            v = {"hash": v, "scope": "admin", "expires": 0} if isinstance(v, str) else v
+            if isinstance(v, dict) and isinstance(v.get("hash"), str) and v.get("scope") in TOKEN_SCOPES:
+                out[name] = {"hash": v["hash"], "scope": v["scope"], "expires": int(v.get("expires") or 0)}
+        return out
+
+    def tokens(self) -> list[dict[str, Any]]:
+        """Token names with scope and expiry, never the hashes."""
+        return [{"name": n, "scope": t["scope"], "expires": t["expires"]} for n, t in sorted(self._tokens().items())]
 
     @staticmethod
     def _write(path: Path, data: dict[str, Any]) -> None:
@@ -150,14 +164,19 @@ class Auth:
             self.sessions.pop(t, None)
         return len(gone)
 
-    def new_token(self, name: str) -> str:
-        """API token for scripts: returned once, stored as SHA-256 (random 32 bytes
-        need no slow hash). The same name replaces its old token."""
+    def new_token(self, name: str, scope: str = "read", days: int = TOKEN_DAYS, now: float | None = None) -> str:
+        """API token for scripts: returned once, stored as SHA-256 (random 32 bytes need no slow hash).
+        scope read|admin; days until it expires (0 = never). The same name replaces its old token."""
         if not USER.match(name):
             raise ValueError("name: 1-64 letters, digits, . _ @ -")
+        if scope not in TOKEN_SCOPES:
+            raise ValueError("scope: read or admin")
+        if not 0 <= days <= TOKEN_DAYS_MAX:
+            raise ValueError(f"days: 0 (never expires) to {TOKEN_DAYS_MAX}")
         token = "wga_" + secrets.token_urlsafe(32)
         tokens = self._tokens()
-        tokens[name] = hashlib.sha256(token.encode()).hexdigest()
+        expires = int((time.time() if now is None else now) + days * 86400) if days else 0
+        tokens[name] = {"hash": hashlib.sha256(token.encode()).hexdigest(), "scope": scope, "expires": expires}
         self._write(self.cfg.tokens_file, tokens)
         return token
 
@@ -168,15 +187,17 @@ class Auth:
         self._write(self.cfg.tokens_file, tokens)
         return True
 
-    def token_user(self, authorization: str) -> str | None:
-        """`Authorization: Bearer wga_...` -> "token:NAME" (shown as the user in the audit)."""
+    def token_user(self, authorization: str, now: float | None = None) -> tuple[str, str] | None:
+        """`Authorization: Bearer wga_...` -> ("token:NAME", scope); the name is the user in the audit.
+        An expired token counts as none."""
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token.startswith("wga_"):
             return None
         digest = hashlib.sha256(token.strip().encode()).hexdigest()
+        now = time.time() if now is None else now
         for name, stored in self._tokens().items():
-            if hmac.compare_digest(digest, stored):
-                return f"token:{name}"
+            if hmac.compare_digest(digest, stored["hash"]):
+                return None if stored["expires"] and now >= stored["expires"] else (f"token:{name}", stored["scope"])
         return None
 
     def _fail(self, ip: str, name: str = "") -> None:

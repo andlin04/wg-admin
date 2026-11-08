@@ -6,7 +6,10 @@
 #               the Server view). --hostname: TLS certificate name (default `hostname -f`).
 # Host settings go to /etc/wireguard/vpn.env once, detected from this host; set any of them in the environment to
 # override (also on later runs): LAN_IF, GATEWAY, GATEWAY_NAME, DNS_CHECK ("SERVER NAME"), CLIENT_DNS, SPLIT_ROUTES,
-# NAT4 (on|off), TRANSIT_IF + TRANSIT_GW (NAT4=off: peers' IPv4 policy-routed out TRANSIT_IF to TRANSIT_GW).
+# NAT4 (on|off), TRANSIT_IF + TRANSIT_GW (NAT4=off: peers' IPv4 policy-routed out TRANSIT_IF to TRANSIT_GW),
+# ADMIN_SOURCES (networks that may open the web UI on :8443, CIDRs comma-separated; default the private ranges;
+# "any" = no limit), WEBUI_EGRESS (networks wg-admin may connect to besides this host; empty = any).
+# AUTO_UPDATES=off: no automatic security updates (default: unattended-upgrades, unless apt has its own setup).
 # Server > Network in the UI changes NAT4, LAN_IF, TRANSIT_IF, TRANSIT_GW later (vpn-peer network-set).
 # Tunnel 10.66.0.0/24 + fd66:66::/64 (server .1 / ::1), UDP 51820. Clients get their profile's routes (enforced here
 # by nftables, written by vpn-peer); with NAT4=on (default) this host masquerades their traffic, so the router needs
@@ -26,7 +29,17 @@ fqdn=${fqdn:-$(hostname -f 2>/dev/null || hostname)}
 [ "$(id -u)" = 0 ] || { echo "install.sh: run as root" >&2; exit 1; }
 
 DEBIAN_FRONTEND=noninteractive apt-get install -y -qq wireguard-tools nftables qrencode dnsutils iputils-ping age \
-  python3-fastapi python3-uvicorn sudo openssl nginx rsyslog logrotate >/dev/null
+  python3-fastapi python3-uvicorn openssl nginx rsyslog logrotate >/dev/null
+# Automatic security updates (Debian's unattended-upgrades, no automatic reboot), unless AUTO_UPDATES=off or the host
+# already has an apt periodic setup of its own (kept as it is).
+if [ "${AUTO_UPDATES:-on}" != off ] && [ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades >/dev/null
+  printf '%s\n' '// wg-admin install.sh: daily package lists and security updates (AUTO_UPDATES=off: none)' \
+    'APT::Periodic::Update-Package-Lists "1";' 'APT::Periodic::Unattended-Upgrade "1";' \
+    > /etc/apt/apt.conf.d/20auto-upgrades
+  printf '%s\n' '// wg-admin install.sh: no automatic reboot' 'Unattended-Upgrade::Automatic-Reboot "false";' \
+    > /etc/apt/apt.conf.d/52wg-admin-unattended
+fi
 
 # ---------------------------------------------------------------- WireGuard
 # Only for new directories; wireguard-tools may already have made /etc/wireguard (700).
@@ -47,8 +60,10 @@ dns=$(awk '$1 == "nameserver" && $2 !~ /^127\./ {print $2; exit}' /run/systemd/r
 dns=${dns:-$gw}
 net=$(ip -4 route show dev "${LAN_IF:-$lan_if}" scope link proto kernel 2>/dev/null | awk '{print $1; exit}')
 declare -A default=([LAN_IF]=$lan_if [GATEWAY]=$gw [GATEWAY_NAME]=Gateway [DNS_CHECK]="$dns deb.debian.org"
-                    [CLIENT_DNS]=$dns [SPLIT_ROUTES]=$net [NAT4]=on [TRANSIT_IF]= [TRANSIT_GW]= [INBOUND]=)
-for k in LAN_IF GATEWAY GATEWAY_NAME DNS_CHECK CLIENT_DNS SPLIT_ROUTES NAT4 TRANSIT_IF TRANSIT_GW INBOUND; do
+                    [CLIENT_DNS]=$dns [SPLIT_ROUTES]=$net [NAT4]=on [TRANSIT_IF]= [TRANSIT_GW]= [INBOUND]=
+                    [ADMIN_SOURCES]=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10 [WEBUI_EGRESS]=)
+for k in LAN_IF GATEWAY GATEWAY_NAME DNS_CHECK CLIENT_DNS SPLIT_ROUTES NAT4 TRANSIT_IF TRANSIT_GW INBOUND ADMIN_SOURCES \
+         WEBUI_EGRESS; do
   if [ -n "${!k:-}" ]; then setenv "$k" "${!k}"; elif ! has "$k"; then setenv "$k" "${default[$k]}"; fi
 done
 [ -n "$endpoint" ] && setenv ENDPOINT "$endpoint"
@@ -119,8 +134,13 @@ printf '%s\n' '[Service]' 'ExecStartPost=/usr/local/sbin/vpn-peer sync' \
 
 # ---------------------------------------------------------------- wg-admin (user wgadmin, root only via vpn-gate)
 id wgadmin >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --shell /usr/sbin/nologin wgadmin
-echo 'wgadmin ALL=(root) NOPASSWD: /usr/local/sbin/vpn-gate' > /etc/sudoers.d/wg-admin
-chmod 440 /etc/sudoers.d/wg-admin; visudo -cq -f /etc/sudoers.d/wg-admin
+# Root work: vpn-gate behind a socket only group wgadmin may use (no sudo: the sandboxed service may not raise
+# privileges). Older installs had a sudoers rule for it; removed.
+rm -f /etc/sudoers.d/wg-admin
+install -m 644 wg-admin-gate.socket wg-admin-gate@.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable -q wg-admin-gate.socket
+systemctl restart wg-admin-gate.socket
 [ -d /etc/wg-admin ] || install -d -m 750 -o root -g wgadmin /etc/wg-admin
 chgrp wgadmin /etc/wg-admin  # a reinstall after uninstall.sh (data kept) gets a new wgadmin group id
 rm -rf /opt/wg-admin.new; mkdir -p /opt/wg-admin.new
@@ -132,7 +152,7 @@ if [ ! -f /etc/wg-admin/wg-admin.env ]; then
   printf '%s\n' '# wg-admin settings (deploy/vpn/wgadmin/config.py). Portal SSO: proxy IPs + /etc/wg-admin/portal.secret.' \
     'WGADMIN_TRUSTED_PROXIES=' 'WGADMIN_EVENT_URL=' 'WGADMIN_CA_FILE=' > /etc/wg-admin/wg-admin.env
 fi
-# Local logins and API tokens (`sudo -u wgadmin python3 -m wgadmin set-password|token NAME` in /opt/wg-admin),
+# Local logins and API tokens (`runuser -u wgadmin -- python3 -m wgadmin set-password|token NAME` in /opt/wg-admin),
 # mail settings and the SMTP relay password (Server > Mail writes them in place), authenticators (Account) and
 # access schedules (Schedules), groups and roles (access.json). wgadmin cannot create files here: each is created once, then written in place.
 for f in users.json tokens.json mail.json totp.json schedules.json access.json; do
@@ -148,7 +168,8 @@ chown wgadmin:wgadmin /etc/wg-admin/smtp.secret; chmod 600 /etc/wg-admin/smtp.se
 if [ ! -f /etc/wg-admin/tls.key ]; then
   (umask 077; openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out /etc/wg-admin/tls.key 2>/dev/null)
 fi
-chown root:wgadmin /etc/wg-admin/tls.key; chmod 640 /etc/wg-admin/tls.key
+# Only nginx's master process (root) reads the key; wg-admin never does, so a compromised UI cannot read it.
+chown root:root /etc/wg-admin/tls.key; chmod 600 /etc/wg-admin/tls.key
 selfsigned() { [ "$(openssl x509 -noout -issuer -nameopt compat -in "$1" | sed 's/^issuer=//')" = \
                  "$(openssl x509 -noout -subject -nameopt compat -in "$1" | sed 's/^subject=//')" ]; }
 if [ ! -f /etc/wg-admin/tls.crt ] || { selfsigned /etc/wg-admin/tls.crt \
@@ -163,6 +184,17 @@ then
 fi
 
 install -m 644 wg-admin.service /etc/systemd/system/
+# WEBUI_EGRESS (vpn.env): networks wg-admin may connect to, CIDRs comma-separated, besides the host itself (mail
+# server, its DNS server, the portal event URL). Empty = any (default).
+egress=$(sed -n 's/^WEBUI_EGRESS=//p' "$ENV" | head -n1)
+if [ -n "$egress" ]; then
+  [[ $egress =~ ^[0-9a-f.:/,]+$ ]] || { echo "install.sh: WEBUI_EGRESS: CIDRs comma-separated" >&2; exit 1; }
+  mkdir -p /etc/systemd/system/wg-admin.service.d
+  printf '%s\n' '# install.sh from WEBUI_EGRESS in /etc/wireguard/vpn.env' '[Service]' 'IPAddressDeny=any' \
+    "IPAddressAllow=localhost ${egress//,/ }" > /etc/systemd/system/wg-admin.service.d/egress.conf
+else
+  rm -f /etc/systemd/system/wg-admin.service.d/egress.conf
+fi
 systemctl daemon-reload
 systemctl enable -q nftables wg-quick@wg0 wg-admin
 systemctl restart nftables

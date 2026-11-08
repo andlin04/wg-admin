@@ -116,11 +116,14 @@ Nothing needs to be installed first; the WireGuard kernel module is part of Debi
    ```
    - It detects the LAN interface, gateway, DNS and LAN subnet and writes them to `/etc/wireguard/vpn.env`.
      To override: `LAN_IF=ens18 CLIENT_DNS=10.0.0.53 bash install.sh`.
+   - The web UI (:8443) answers only private networks (`ADMIN_SOURCES` in `vpn.env`, see [Firewall](#firewall)).
    - TLS is self-signed until you sign `/etc/wg-admin/tls.csr`.
+   - Security updates install daily (unattended-upgrades, no automatic reboot), unless the host already has its own
+     apt setup or you run `AUTO_UPDATES=off bash install.sh`.
    - Behind an HTTP proxy: export `http_proxy` and `https_proxy` first (apt and git use them).
 3. **First admin:**
    ```
-   cd /opt/wg-admin && sudo -u wgadmin python3 -m wgadmin set-password NAME
+   cd /opt/wg-admin && runuser -u wgadmin -- python3 -m wgadmin set-password NAME
    ```
    Then open `https://HOST:8443/`. Everything else is set in the UI.
 4. **Update:** `git -C /root/wg-admin pull && bash /root/wg-admin/install.sh`. Keys, devices and settings stay.
@@ -188,6 +191,12 @@ Optional: a second interface can carry the decrypted traffic (transit interface 
   that table.
 - A host with its own `/etc/nftables.conf` needs `include "/etc/nftables.d/*.nft"` in it.
 - Dry run: `vpn-peer check`.
+- Web UI access: port 8443 only from `ADMIN_SOURCES` in `/etc/wireguard/vpn.env` (CIDRs, comma-separated; default
+  `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7,fe80::/10`; `any` = no limit) and from the host itself. Devices
+  on the VPN never reach the host. After a change: `vpn-peer firewall`.
+- Web UI outbound (optional): `WEBUI_EGRESS` in `vpn.env` (CIDRs, comma-separated) lets wg-admin connect only to
+  those networks and the host itself; include the mail server and its DNS server. Empty (default) = any. After a
+  change: `bash install.sh`.
 - By default nothing on the LAN side can open a connection to a device.
 - Route mode only: to let the LAN reach a server-type device (SSH, metrics), set
   `INBOUND=SRC>DST[/tcp|udp/PORT],...` in `/etc/wireguard/vpn.env`, then run `vpn-peer firewall`.
@@ -212,8 +221,13 @@ Optional: a second interface can carry the decrypted traffic (transit interface 
 - **Lockout:** 5 failed sign-ins within 15 minutes block that network address. Admins can reset it (Users > Reset
   lockout).
 - **Sessions:** HttpOnly, Secure, SameSite=Strict cookie. Changes are accepted only from wg-admin's own pages.
-- **Privileges:** the app runs as the unprivileged user `wgadmin`. It reaches root only through `vpn-gate`, which
-  accepts a fixed set of checked requests.
+- **Privileges:** the app runs as the unprivileged user `wgadmin` in a systemd sandbox (no sudo, no capabilities,
+  read-only system, memory/CPU/task limits). It reaches root only through `vpn-gate`'s socket, which accepts a fixed
+  set of checked requests. vpn-gate and the timer jobs run sandboxed too: network administration only, writes only
+  to the WireGuard, nftables and logging settings.
+- **API tokens:** read-only (default) or admin, expire after 90 days by default, stored as SHA-256 hashes.
+- **Web:** TLS 1.2+, a strict Content-Security-Policy, the UI port limited to `ADMIN_SOURCES`.
+- Details and reporting a vulnerability: [SECURITY.md](SECURITY.md).
 - **Keys:** device keys stay on the server (mode 600). Each stored client config is deleted after the device's first
   connection.
 - **Data files:** `/etc/wg-admin/` (users, access, schedules, TOTP; mode 600, owner `wgadmin`).
@@ -222,10 +236,11 @@ Optional: a second interface can carry the decrypted traffic (transit interface 
 
 | Command | Does |
 | --- | --- |
-| `sudo -u wgadmin python3 -m wgadmin set-password NAME` | Set a password; creates the first admin. Also the fix when locked out. Scripted: pipe the password on stdin. |
-| `sudo -u wgadmin python3 -m wgadmin totp-reset NAME` | Remove a user's authenticator (lost phone). |
-| `sudo -u wgadmin python3 -m wgadmin token NAME` | API token for scripts, printed once (`Authorization: Bearer wga_...`). The same NAME replaces its old token. |
-| `sudo -u wgadmin python3 -m wgadmin token-revoke NAME` | Revoke an API token. |
+| `runuser -u wgadmin -- python3 -m wgadmin set-password NAME` | Set a password; creates the first admin. Also the fix when locked out. Scripted: pipe the password on stdin. |
+| `runuser -u wgadmin -- python3 -m wgadmin totp-reset NAME` | Remove a user's authenticator (lost phone). |
+| `runuser -u wgadmin -- python3 -m wgadmin token NAME [read\|admin] [DAYS]` | API token for scripts, printed once (`Authorization: Bearer wga_...`). Default `read` (GET only, no device configs or QR codes), 90 days; `0` days = never expires. The same NAME replaces its old token. |
+| `runuser -u wgadmin -- python3 -m wgadmin tokens` | List tokens: name, scope, expiry. |
+| `runuser -u wgadmin -- python3 -m wgadmin token-revoke NAME` | Revoke an API token. |
 | `vpn-peer check` | Firewall dry run. |
 | `vpn-peer firewall` | Apply the firewall again. |
 | `vpn-peer export FILE` / `vpn-peer import FILE` | Encrypted backup and restore. |
@@ -238,8 +253,10 @@ Optional: a second interface can carry the decrypted traffic (transit interface 
 | uninstall.sh | Removes it; data kept unless `--purge`; wg0 always stopped (no devices without the firewall) |
 | vpn-peer.sh | All VPN logic (installed as `/usr/local/sbin/vpn-peer`) |
 | vpn-gate.sh | wg-admin's only way to root (a fixed set of requests) |
+| wg-admin-gate.socket, wg-admin-gate@.service | vpn-gate's socket (group `wgadmin` only); one root vpn-gate per request |
 | wgadmin/ | FastAPI app and the static UI |
-| wg-admin.service, wg-admin.nginx.conf | App on 127.0.0.1:8080; nginx TLS front on :8443 |
+| wg-admin.service, wg-admin.nginx.conf | Sandboxed app on 127.0.0.1:8080; nginx TLS front on :8443 |
+| SECURITY.md | Privilege model, what is protected how, reporting a vulnerability |
 | wg-connlog.* | Connection log, every 30 seconds |
 | wg-metrics.* | Prometheus metrics, every minute (only with node_exporter) |
 | docs/ | Screenshots for this README |

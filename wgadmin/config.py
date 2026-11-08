@@ -12,6 +12,9 @@ def _env(name: str, default: str) -> str:
 
 @dataclass(frozen=True)
 class Config:
+    # Root work goes through vpn-gate, reached over its socket (wg-admin-gate.socket: systemd starts one root
+    # vpn-gate per request; only group wgadmin may connect). Empty socket = run `sudo -n vpn-gate` (development).
+    gate_socket: str = field(default_factory=lambda: _env("WGADMIN_GATE_SOCKET", "/run/wg-admin/gate.sock"))
     gate: str = field(default_factory=lambda: _env("WGADMIN_GATE", "/usr/local/sbin/vpn-gate"))
     sudo: str = field(default_factory=lambda: _env("WGADMIN_SUDO", "sudo"))  # "" = call the gate directly
     timeout_s: int = 30

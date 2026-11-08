@@ -15,10 +15,11 @@ case ${1:-} in
 esac
 [ "$(id -u)" = 0 ] || { echo "uninstall.sh: run as root" >&2; exit 1; }
 
-systemctl disable -q --now wg-admin wg-metrics.timer wg-connlog.timer wg-quick@wg0 2>/dev/null || true
+systemctl disable -q --now wg-admin wg-admin-gate.socket wg-metrics.timer wg-connlog.timer wg-quick@wg0 2>/dev/null || true
 systemctl stop wg-metrics.service wg-connlog.service 2>/dev/null || true
 rm -f /etc/systemd/system/wg-admin.service /etc/systemd/system/wg-metrics.service /etc/systemd/system/wg-metrics.timer \
-  /etc/systemd/system/wg-connlog.service /etc/systemd/system/wg-connlog.timer
+  /etc/systemd/system/wg-connlog.service /etc/systemd/system/wg-connlog.timer \
+  /etc/systemd/system/wg-admin-gate.socket /etc/systemd/system/wg-admin-gate@.service
 rm -rf /etc/systemd/system/wg-quick@wg0.service.d
 systemctl daemon-reload
 

@@ -2,6 +2,26 @@
 
 Newest first. `install.sh` applies an update in place; settings, keys and devices stay.
 
+## 2026-11-08: security hardening
+
+- wg-admin runs in a systemd sandbox without sudo: root work goes through vpn-gate's socket
+  (`wg-admin-gate.socket`, group `wgadmin` only); the sudoers rule is removed on update.
+- API tokens get a scope (`read` by default: GET only, no device configs or QR codes; or `admin`) and an expiry
+  (90 days by default). `python3 -m wgadmin tokens` lists them. Older tokens keep working as admin without expiry:
+  replace them.
+- The web UI port 8443 answers only `ADMIN_SOURCES` (vpn.env; default the private ranges; `any` = no limit).
+- nginx sends a strict Content-Security-Policy, Permissions-Policy and Cross-Origin-Opener-Policy; the page script
+  moved from index.html to app.js.
+- vpn-gate (root) and the timer jobs run in a systemd sandbox as well: only network administration, writes only to
+  the WireGuard, nftables and logging settings.
+- wg-admin gets limits: 256 MB memory, 64 tasks, half a CPU. Optional `WEBUI_EGRESS` (vpn.env) limits where it may
+  connect to.
+- The TLS key is root only (600); nginx reads it, wg-admin never did.
+- `sudo` is no longer installed; the commands in this README use `runuser -u wgadmin --`.
+- install.sh turns on daily security updates (unattended-upgrades, no automatic reboot) unless the host has its own
+  apt setup or `AUTO_UPDATES=off`.
+- SECURITY.md: privilege model, protections, reporting a vulnerability.
+
 ## 2026-11-08: README opening
 
 - The first two lines state the purpose: WireGuard is hard to manage beyond a few peers; wg-admin adds a web UI for it.

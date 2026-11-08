@@ -1,7 +1,7 @@
-"""WireGuard peers and profiles on this host ().
+"""WireGuard peers and profiles on this host.
 
-wg-admin runs as the unprivileged user wgadmin and reaches vpn-peer only through `sudo -n vpn-gate "<request>"`
-(deploy/vpn/vpn-gate.sh): fixed requests only, so the gate's checks stay the boundary to root. Names, routes, DNS and
+wg-admin runs as the unprivileged, sandboxed user wgadmin and reaches vpn-peer only through vpn-gate's socket
+(deploy/vpn/vpn-gate.sh, wg-admin-gate.socket): fixed requests only, so the gate's checks stay the boundary to root. Names, routes, DNS and
 descriptions are checked here and again by the gate; nothing builds a shell command from free text. Client configs
 hold the client's private key: callers must never log them.
 """
@@ -11,6 +11,7 @@ import csv
 import io
 import ipaddress
 import re
+import socket
 import subprocess
 import time
 import zipfile
@@ -48,6 +49,37 @@ class VpnError(Exception):
 
 def _default_runner(args: list[str], timeout: int) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def socket_runner(path: str) -> Runner:
+    """vpn-gate over its socket (vpn-gate.sh --socket): send the request line, read until the gate closes:
+    a header `WGA RC OUTBYTES ERRBYTES`, then stdout and stderr."""
+    def run(args: list[str], timeout: int) -> subprocess.CompletedProcess:
+        request = args[-1]
+        chunks: list[bytes] = []
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(timeout)
+                s.connect(path)
+                s.sendall(request.encode() + b"\n")
+                s.shutdown(socket.SHUT_WR)
+                while chunk := s.recv(65536):
+                    chunks.append(chunk)
+        except TimeoutError:
+            raise subprocess.TimeoutExpired(args, timeout) from None
+        except FileNotFoundError:
+            raise FileNotFoundError(path) from None
+        except OSError as exc:
+            return subprocess.CompletedProcess(args, 1, "", f"gate socket {path}: {exc.strerror or exc}")
+        data = b"".join(chunks)
+        head, _, body = data.partition(b"\n")
+        f = head.split()
+        if len(f) != 4 or f[0] != b"WGA" or not all(x.isdigit() for x in f[1:]):
+            return subprocess.CompletedProcess(args, 1, "", "gate socket: malformed answer")
+        rc, n_out, n_err = (int(x) for x in f[1:])
+        out, err = body[:n_out], body[n_out:n_out + n_err]
+        return subprocess.CompletedProcess(args, rc, out.decode("utf-8", "replace"), err.decode("utf-8", "replace"))
+    return run
 
 
 def check_name(name: str) -> str:
@@ -146,8 +178,12 @@ def profile_request(name: str, routes: str, dns: str, description: str, ipv6: bo
 
 
 def call(cfg: Config, request: str, runner: Runner | None = None) -> str:
-    """One gate request (sudo -n vpn-gate REQUEST) -> its output; a non-zero exit becomes VpnError."""
-    args = ([cfg.sudo, "-n"] if cfg.sudo else []) + [cfg.gate, request]
+    """One gate request (over the gate socket, else sudo -n vpn-gate REQUEST) -> its output; a non-zero exit
+    becomes VpnError."""
+    if runner is None and cfg.gate_socket:
+        args, runner = [cfg.gate_socket, request], socket_runner(cfg.gate_socket)
+    else:
+        args = ([cfg.sudo, "-n"] if cfg.sudo else []) + [cfg.gate, request]
     try:
         proc = (runner or _default_runner)(args, cfg.timeout_s)
     except subprocess.TimeoutExpired:

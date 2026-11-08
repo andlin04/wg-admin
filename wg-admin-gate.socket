@@ -1,0 +1,16 @@
+# wg-admin's way to root: one connection = one vpn-gate request (wg-admin-gate@.service runs it as root).
+# Only root and group wgadmin may connect; vpn-gate refuses every request outside its fixed list.
+[Unit]
+Description=wg-admin root gate socket
+
+[Socket]
+ListenStream=/run/wg-admin/gate.sock
+SocketUser=root
+SocketGroup=wgadmin
+SocketMode=0660
+DirectoryMode=0755
+Accept=yes
+MaxConnections=16
+
+[Install]
+WantedBy=sockets.target

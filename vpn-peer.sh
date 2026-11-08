@@ -93,6 +93,8 @@ OUT4=$(envval TRANSIT_IF); OUT4=${OUT4:-$LAN}
 # INBOUND: connections the router side may open to peers, SRC>DST[/tcp|udp/PORT[-PORT]],...
 # (e.g. 192.168.1.10/32>10.66.0.4/32/tcp/22). Empty = none: by default nothing reaches a peer from outside wg0.
 INBOUND=$(envval INBOUND)
+# ADMIN_SOURCES: networks that may open the web UI (nginx :8443), CIDRs comma-separated; empty or "any" = no limit.
+ADMIN_SOURCES=$(envval ADMIN_SOURCES)
 TUN4=10.66.0.0/24 RT_TABLE=66
 ACTIVATE_DAYS=$(envval ACTIVATE_DAYS)  # days a new device has for its first connection (vpn.env, default 3)
 [[ $ACTIVATE_DAYS =~ ^[1-9][0-9]?$ ]] || ACTIVATE_DAYS=3
@@ -213,9 +215,21 @@ inbound_rule() {
   fi
   echo "    iifname \"$OUT4\" oifname \"wg0\" ip saddr $src ip daddr $a/$p${proto:+ $proto dport $ports} accept"
 }
+# Web UI port 8443 only from ADMIN_SOURCES (and this host itself: SSH tunnels, local checks); the rest is dropped.
+admin_rules() {
+  [[ -z $ADMIN_SOURCES || $ADMIN_SOURCES == any ]] && return 0
+  local a4 a6
+  a4=$(csv "$ADMIN_SOURCES" '^[0-9.]+(/[0-9]{1,2})?$')
+  a6=$(csv "$ADMIN_SOURCES" '^[0-9a-f:]*:[0-9a-f:]*(/[0-9]{1,3})?$')
+  echo "    iifname \"lo\" tcp dport 8443 accept"
+  [ -z "$a4" ] || echo "    tcp dport 8443 ip saddr { $a4 } accept"
+  [ -z "$a6" ] || echo "    tcp dport 8443 ip6 saddr { $a6 } accept"
+  echo "    tcp dport 8443 drop"
+}
 ruleset() {
-  local n r d v6 allow _ id peers r4 dns dns6 x sets="" rules="" nat="" inbound=""
+  local n r d v6 allow _ id peers r4 dns dns6 x sets="" rules="" nat="" inbound="" admin
   for x in ${INBOUND//,/ }; do inbound+="$(inbound_rule "$x")"$'\n'; done
+  admin=$(admin_rules)
   [ "$NAT4" = off ] && nat="meta nfproto ipv6 "
   local V6='^[0-9a-f]*:[0-9a-f:]*$'
   seed_profiles
@@ -272,6 +286,7 @@ ${sets}
     iifname "wg0" icmp type echo-request accept
     iifname "wg0" icmpv6 type echo-request accept
     iifname "wg0" drop
+${admin}
   }
   chain forward {
     type filter hook forward priority 0; policy accept;

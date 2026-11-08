@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import socket
 import threading
 import time
@@ -104,6 +105,10 @@ class OwnPasswordIn(BaseModel):
 class PolicyIn(BaseModel):
     totp_roles: list[str] = Field(default_factory=list, max_length=2)
     pw_history: int | None = Field(None, ge=0, le=50)  # None: unchanged
+
+
+# Responses that carry a device's private key: never for a read-only API token.
+KEY_PATH = re.compile(r"^/api/peers/[^/]+/(conf|package|qr)$")
 
 
 @dataclass(frozen=True)
@@ -316,8 +321,11 @@ def create_app(cfg: Config | None = None, runner: vpn.Runner | None = None, sink
             if must_enrol(user, acct["role"]) and not request.url.path.startswith(("/api/me", "/api/account/")):
                 raise HTTPException(403, "your role needs two-step sign-in: Account > Set up authenticator first")
             return Who(user, "local", acct["role"], tuple(acct["groups"]))
-        user = auth.token_user(request.headers.get("authorization", ""))
-        if user:
+        found = auth.token_user(request.headers.get("authorization", ""))
+        if found:
+            user, scope = found
+            if scope == "read" and (request.method not in ("GET", "HEAD") or KEY_PATH.search(request.url.path)):
+                raise HTTPException(403, "read-only token: no changes, device configs, QR codes or packages")
             return Who(user, "token")
         raise HTTPException(401, "sign in required")
 

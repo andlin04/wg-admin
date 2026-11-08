@@ -7,3 +7,25 @@ Type=oneshot
 ExecStart=/usr/local/sbin/wg-connlog
 # Its own wg-conn lines are notice; systemd's start/finish lines every 30 s (info) stay out of the journal and log1.
 LogLevelMax=notice
+# Sandbox: reads wg0 (CAP_NET_ADMIN), writes its state and the kernel's WireGuard debug switch (debugfs).
+ProtectSystem=strict
+StateDirectory=wg-connlog
+ReadWritePaths=-/sys/kernel/debug/dynamic_debug/control
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

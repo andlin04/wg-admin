@@ -1,7 +1,8 @@
 #!/bin/bash
-# wg-admin's only way to root on vpn1 (installed by setup-vpn1.sh as /usr/local/sbin/vpn-gate; sudoers lets user
-# wgadmin run it): `sudo -n vpn-gate "<request>"`. Until 2026-10-26 it was the forced command of the portal's SSH key
-# (SSH_ORIGINAL_COMMAND, still read). Only these requests pass to vpn-peer; everything else is refused:
+# wg-admin's only way to root (installed by install.sh as /usr/local/sbin/vpn-gate). wg-admin sends one request line
+# to /run/wg-admin/gate.sock; wg-admin-gate.socket (group wgadmin only) starts `vpn-gate --socket` as root for each
+# connection, which answers `WGA RC OUTBYTES ERRBYTES`, stdout, stderr. Also: `vpn-gate "<request>"` as root, and
+# SSH_ORIGINAL_COMMAND (a forced SSH command). Only these requests pass to vpn-peer; everything else is refused:
 #   dump | add NAME PROFILE [- DAYS] | profile NAME PROFILE | tags NAME TAGS | remove NAME | conf NAME | qr NAME
 #   enable NAME [DAYS] | disable NAME | activated NAME   (DAYS: activation deadline, 1-30 days)
 #   profiles | profile-set PROFILE ROUTES DNS v6=on|off allow=RULES [DESCRIPTION] | profile-del PROFILE | health
@@ -11,6 +12,16 @@
 set -euo pipefail
 PEER=/usr/local/sbin/vpn-peer
 (( $# <= 1 )) || { echo "refused: one request argument"; exit 2; }
+if [[ ${1:-} == --socket ]]; then  # one request line from the socket (stdin), the framed answer back (stdout)
+  req=""
+  IFS= read -r -t 10 -n 1000 req || true
+  [[ $req != -* ]] || req=refused  # no options through the socket
+  o=$(mktemp) e=$(mktemp); trap 'rm -f "$o" "$e"' EXIT
+  rc=0; "$(readlink -f "$0")" "$req" >"$o" 2>"$e" </dev/null || rc=$?
+  printf 'WGA %d %d %d\n' "$rc" "$(stat -c %s "$o")" "$(stat -c %s "$e")"
+  cat "$o" "$e"
+  exit 0
+fi
 cmd=${SSH_ORIGINAL_COMMAND:-${1:-}}
 N='[a-z0-9][a-z0-9-]{0,30}' P='[a-z0-9][a-z0-9-]{0,15}'
 G='-|[a-z0-9][a-z0-9-]{0,19}(,[a-z0-9][a-z0-9-]{0,19}){0,7}'
